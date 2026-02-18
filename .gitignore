@@ -1,0 +1,30 @@
+# Uploaded files
+uploads/projects/
+uploads/*/
+!uploads/.htaccess
+
+# Config with secrets (use config/database.example.php as template)
+# config/database.php
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Composer (if added later)
+/vendor/

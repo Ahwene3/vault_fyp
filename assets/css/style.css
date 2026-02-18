@@ -1,0 +1,138 @@
+/* FYP Vault - Main styles */
+:root {
+    --vault-primary: #0d6efd;
+    --vault-dark: #0a58ca;
+    --vault-sidebar: #212529;
+    --vault-card-shadow: 0 0.125rem 0.5rem rgba(0,0,0,0.08);
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: #f8f9fa;
+}
+
+main {
+    flex: 1;
+}
+
+.navbar-brand {
+    font-size: 1.25rem;
+}
+
+.card {
+    border: none;
+    box-shadow: var(--vault-card-shadow);
+    border-radius: 0.5rem;
+}
+
+.card-header {
+    background: #fff;
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+}
+
+.table th {
+    font-weight: 600;
+    color: #495057;
+}
+
+.badge-status {
+    font-weight: 500;
+}
+
+.btn {
+    border-radius: 0.375rem;
+}
+
+/* Auth pages */
+.auth-wrapper {
+    max-width: 420px;
+    margin: 2rem auto;
+}
+
+.auth-card {
+    padding: 2rem;
+}
+
+/* Dashboard stats */
+.stat-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.25rem 1rem rgba(0,0,0,0.12);
+}
+
+.stat-card .bi {
+    font-size: 2rem;
+    opacity: 0.8;
+}
+
+/* Logbook */
+.logbook-entry {
+    border-left: 4px solid var(--vault-primary);
+}
+
+.logbook-entry.pending {
+    border-left-color: #ffc107;
+}
+
+.logbook-entry.flagged {
+    border-left-color: #dc3545;
+}
+
+.logbook-entry.approved {
+    border-left-color: #198754;
+}
+
+/* Messages */
+.message-item.unread {
+    background-color: rgba(13, 110, 253, 0.06);
+}
+
+/* File upload zone */
+.upload-zone {
+    border: 2px dashed #dee2e6;
+    border-radius: 0.5rem;
+    padding: 2rem;
+    text-align: center;
+    background: #f8f9fa;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-zone:hover,
+.upload-zone.dragover {
+    border-color: var(--vault-primary);
+    background: rgba(13, 110, 253, 0.04);
+}
+
+/* Vault / Archive */
+.vault-item {
+    padding: 1rem;
+    border-radius: 0.5rem;
+    transition: background 0.2s;
+}
+
+.vault-item:hover {
+    background: #f8f9fa;
+}
+
+/* Notifications */
+.notification-badge {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    font-size: 0.65rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .auth-wrapper {
+        margin: 1rem auto;
+        padding: 0 1rem;
+    }
+}

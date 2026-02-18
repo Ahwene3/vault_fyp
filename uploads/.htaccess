@@ -1,0 +1,4 @@
+# Restrict direct access to uploads; serve only via PHP when authorized
+<FilesMatch "\.(php|phtml|php3|php4|php5|phps)$">
+    Deny from all
+</FilesMatch>

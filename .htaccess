@@ -1,0 +1,7 @@
+# Optional: deny direct access to config and SQL (if AllowOverride is enabled)
+<FilesMatch "^(database\.php)$">
+    Require all denied
+</FilesMatch>
+
+# Prevent directory listing
+Options -Indexes
