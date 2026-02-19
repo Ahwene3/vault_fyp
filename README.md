@@ -99,6 +99,23 @@ vault/
 3. **HOD** approves/rejects topics, assigns supervisors to approved projects, marks projects completed and archives them, and views reports.
 4. **Admin** adds supervisors/HOD, manages user status; all roles can browse the **Project Vault** (archived projects only).
 
+## Git: Push to your remote
+
+The project is already a Git repo with an initial commit. To push to your own Git host (GitHub, GitLab, etc.):
+
+1. **Create a new empty project** on your Git host (do not add a README or .gitignore).
+
+2. **Add the remote and push** (replace `YOUR_USERNAME` and `YOUR_REPO` with your details):
+
+   ```bash
+   cd /var/www/html/vault
+   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
+   git push -u origin main
+   ```
+
+   For GitLab: `https://gitlab.com/YOUR_USERNAME/YOUR_REPO.git`  
+   For SSH: `git@github.com:YOUR_USERNAME/YOUR_REPO.git`
+
 ## License
 
 Use as needed for educational/institutional purposes.
