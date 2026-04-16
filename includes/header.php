@@ -73,6 +73,34 @@ $user = current_user();
             </div>
         </div>
     </nav>
+    <section class="quick-nav-bar border-bottom">
+        <div class="container d-flex flex-wrap align-items-center justify-content-between gap-2 py-2">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="js-nav-back" title="Go to previous page">
+                    <i class="bi bi-arrow-left"></i> Back
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="js-nav-forward" title="Go to next page">
+                    Forward <i class="bi bi-arrow-right"></i>
+                </button>
+                <?php if ($user): ?>
+                    <a href="<?= base_url('dashboard.php') ?>" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-house-door"></i> Dashboard
+                    </a>
+                    <a href="<?= base_url('vault.php') ?>" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-archive"></i> Vault
+                    </a>
+                <?php else: ?>
+                    <a href="<?= base_url('index.php') ?>" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-box-arrow-in-right"></i> Login
+                    </a>
+                    <a href="<?= base_url('register.php') ?>" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-person-plus"></i> Register
+                    </a>
+                <?php endif; ?>
+            </div>
+            <div class="quick-nav-tip small" id="js-fun-tip" aria-live="polite">Tip: Use Back and Forward to move quickly through your workflow.</div>
+        </div>
+    </section>
     <main class="container py-4">
         <?php
         $success = flash('success');

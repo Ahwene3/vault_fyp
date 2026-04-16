@@ -4,18 +4,63 @@ require_role('admin');
 
 $pdo = getPDO();
 
-$users = $pdo->query('SELECT id, email, full_name, role, department, reg_number, is_active, created_at FROM users ORDER BY role, full_name')->fetchAll();
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     $action = $_POST['action'] ?? '';
     $target_id = (int) ($_POST['user_id'] ?? 0);
     if ($target_id && $target_id !== user_id()) {
-        if ($action === 'toggle_active') {
+        if ($action === 'toggle_active' || $action === 'archive') {
             $pdo->prepare('UPDATE users SET is_active = NOT is_active WHERE id = ?')->execute([$target_id]);
             flash('success', 'User status updated.');
-        } elseif ($action === 'delete') {
-            $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$target_id]);
-            flash('success', 'User removed.');
+        } elseif ($action === 'update_user') {
+            $full_name = trim($_POST['full_name'] ?? '');
+            $email = trim($_POST['email'] ?? '');
+            $role = $_POST['role'] ?? 'supervisor';
+            $department = trim($_POST['department'] ?? '');
+            $reg_number = trim($_POST['reg_number'] ?? '');
+            $phone = trim($_POST['phone'] ?? '');
+            $new_password = $_POST['new_password'] ?? '';
+
+            if (!$full_name || !$email) {
+                flash('error', 'Full name and email are required.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                flash('error', 'Please provide a valid email address.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
+            if (!in_array($role, ['student', 'supervisor', 'hod', 'admin'], true)) {
+                flash('error', 'Invalid role selected.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
+
+            $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ? AND id <> ?');
+            $stmt->execute([$email, $target_id]);
+            if ($stmt->fetch()) {
+                flash('error', 'Another account already uses this email.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
+
+            if ($new_password !== '' && strlen($new_password) < 8) {
+                flash('error', 'New password must be at least 8 characters.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
+
+            $pdo->prepare('UPDATE users SET full_name = ?, email = ?, role = ?, department = ?, reg_number = ?, phone = ? WHERE id = ?')
+                ->execute([
+                    $full_name,
+                    $email,
+                    $role,
+                    $department ?: null,
+                    $reg_number ?: null,
+                    $phone ?: null,
+                    $target_id,
+                ]);
+
+            if ($new_password !== '') {
+                $hash = password_hash($new_password, PASSWORD_DEFAULT);
+                $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([$hash, $target_id]);
+            }
+            flash('success', 'User details updated.');
         }
         redirect(base_url('admin/users.php'));
     }
@@ -46,6 +91,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
     }
 }
 
+$edit_id = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
+$edit_user = null;
+if ($edit_id > 0) {
+    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, reg_number, phone, is_active FROM users WHERE id = ?');
+    $stmt->execute([$edit_id]);
+    $edit_user = $stmt->fetch();
+}
+
+$users = $pdo->query('SELECT id, email, full_name, role, department, reg_number, phone, is_active, created_at FROM users ORDER BY role, full_name')->fetchAll();
+
 $pageTitle = 'Manage Users';
 require_once __DIR__ . '/../includes/header.php';
 ?>
@@ -68,6 +123,61 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
+<?php if ($edit_user): ?>
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Edit User</span>
+        <a href="<?= base_url('admin/users.php') ?>" class="btn btn-sm btn-outline-secondary">Close</a>
+    </div>
+    <div class="card-body">
+        <form method="post" class="row g-3">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="update_user">
+            <input type="hidden" name="user_id" value="<?= (int) $edit_user['id'] ?>">
+
+            <div class="col-md-4">
+                <label class="form-label">Full Name</label>
+                <input type="text" name="full_name" class="form-control" required value="<?= e($edit_user['full_name']) ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-control" required value="<?= e($edit_user['email']) ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Role</label>
+                <select name="role" class="form-select">
+                    <option value="student" <?= $edit_user['role'] === 'student' ? 'selected' : '' ?>>Student</option>
+                    <option value="supervisor" <?= $edit_user['role'] === 'supervisor' ? 'selected' : '' ?>>Supervisor</option>
+                    <option value="hod" <?= $edit_user['role'] === 'hod' ? 'selected' : '' ?>>HOD</option>
+                    <option value="admin" <?= $edit_user['role'] === 'admin' ? 'selected' : '' ?>>Admin</option>
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Department</label>
+                <input type="text" name="department" class="form-control" value="<?= e($edit_user['department'] ?? '') ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Reg. Number</label>
+                <input type="text" name="reg_number" class="form-control" value="<?= e($edit_user['reg_number'] ?? '') ?>">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Phone</label>
+                <input type="text" name="phone" class="form-control" value="<?= e($edit_user['phone'] ?? '') ?>">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Reset Password (optional)</label>
+                <input type="password" name="new_password" class="form-control" minlength="8" placeholder="Leave blank to keep current password">
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="card">
     <div class="card-body">
         <table class="table">
@@ -82,17 +192,12 @@ require_once __DIR__ . '/../includes/header.php';
                         <td><?= $u['is_active'] ? 'Yes' : 'No' ?></td>
                         <td>
                             <?php if ($u['id'] != user_id()): ?>
+                                <a href="<?= base_url('admin/users.php?edit=' . $u['id']) ?>" class="btn btn-sm btn-outline-primary">Edit</a>
                                 <form method="post" class="d-inline">
                                     <?= csrf_field() ?>
-                                    <input type="hidden" name="action" value="toggle_active">
+                                    <input type="hidden" name="action" value="archive">
                                     <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-warning"><?= $u['is_active'] ? 'Deactivate' : 'Activate' ?></button>
-                                </form>
-                                <form method="post" class="d-inline" onsubmit="return confirm('Remove this user?');">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    <button type="submit" class="btn btn-sm btn-outline-warning"><?= $u['is_active'] ? 'Archive' : 'Restore' ?></button>
                                 </form>
                             <?php endif; ?>
                         </td>

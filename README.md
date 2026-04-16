@@ -8,7 +8,7 @@ A PHP/MySQL web application for managing final year projects with role-based acc
 - **Student**: Submit project topic, upload documents (PDF/DOCX/ZIP), logbook, view feedback & assessments, messaging
 - **Supervisor**: Manage assigned students, review documents, submit assessments, approve/flag logbook entries, messaging
 - **HOD**: Approve/reject topics, assign supervisors, archive completed projects, reports
-- **Admin**: Manage users (add supervisor/HOD/admin), view vault
+- **Admin**: Manage users (add, edit, archive/restore supervisor/HOD/admin/student accounts), view vault
 - **Project Vault**: Searchable archive of completed projects (by year, topic, student, supervisor)
 - **Notifications**: In-app alerts for uploads, feedback, approvals, messages
 - **Secure file uploads**: Type and size validation; downloads via PHP with access control
@@ -97,7 +97,7 @@ vault/
 1. **Students** register, log in, submit a project topic. After HOD approval and supervisor assignment, they upload documents, maintain the logbook, and message their supervisor.
 2. **Supervisors** (added by Admin) see assigned students, give feedback on documents, submit assessments, and approve/flag logbook entries.
 3. **HOD** approves/rejects topics, assigns supervisors to approved projects, marks projects completed and archives them, and views reports.
-4. **Admin** adds supervisors/HOD, manages user status; all roles can browse the **Project Vault** (archived projects only).
+4. **Admin** adds users, edits user details, archives/restores accounts; all roles can browse the **Project Vault** (archived projects only).
 
 ## Git: Push to your remote
 
