@@ -10,6 +10,11 @@ $pdo = getPDO();
 // Role-specific dashboard data
 $stats = [];
 if ($role === 'student') {
+    // Get student's group
+    $stmt = $pdo->prepare('SELECT g.id, g.name, COUNT(gm.id) AS member_count FROM groups g LEFT JOIN group_members gm ON g.id = gm.group_id WHERE g.id IN (SELECT group_id FROM group_members WHERE student_id = ?) GROUP BY g.id LIMIT 1');
+    $stmt->execute([$uid]);
+    $stats['group'] = $stmt->fetch();
+    
     $stmt = $pdo->prepare('SELECT id, title, status, supervisor_id FROM projects WHERE student_id = ? ORDER BY updated_at DESC LIMIT 1');
     $stmt->execute([$uid]);
     $stats['project'] = $stmt->fetch();
@@ -52,7 +57,21 @@ require_once __DIR__ . '/includes/header.php';
 
 <?php if ($role === 'student'): ?>
     <div class="row g-3 mb-4">
-        <div class="col-md-4">
+        <?php if ($stats['group']): ?>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center">
+                    <div class="text-primary me-3"><i class="bi bi-people"></i></div>
+                    <div>
+                        <h6 class="text-muted mb-0">My Group</h6>
+                        <span class="fw-bold"><?= e($stats['group']['name']) ?></span>
+                        <br><small class="text-muted"><?= $stats['group']['member_count'] ?> members</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+        <div class="col-md-<?= $stats['group'] ? '3' : '4' ?>">
             <div class="card stat-card h-100">
                 <div class="card-body d-flex align-items-center">
                     <div class="text-primary me-3"><i class="bi bi-journal-richtext"></i></div>
@@ -66,7 +85,7 @@ require_once __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-<?= $stats['group'] ? '3' : '4' ?>">
             <div class="card stat-card h-100">
                 <div class="card-body d-flex align-items-center">
                     <div class="text-success me-3"><i class="bi bi-book"></i></div>
@@ -77,7 +96,7 @@ require_once __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-<?= $stats['group'] ? '3' : '4' ?>">
             <div class="card stat-card h-100">
                 <div class="card-body d-flex align-items-center">
                     <div class="text-info me-3"><i class="bi bi-chat-dots"></i></div>
@@ -92,6 +111,9 @@ require_once __DIR__ . '/includes/header.php';
     <div class="card">
         <div class="card-header">Quick Actions</div>
         <div class="card-body">
+            <?php if (!$stats['group']): ?>
+            <a href="<?= base_url('student/group.php') ?>" class="btn btn-outline-primary me-2">Create/Join Group</a>
+            <?php endif; ?>
             <a href="<?= base_url('student/project.php') ?>" class="btn btn-primary me-2">My Project / Submit Topic</a>
             <a href="<?= base_url('student/logbook.php') ?>" class="btn btn-outline-primary me-2">Logbook</a>
             <a href="<?= base_url('messages.php') ?>" class="btn btn-outline-primary">Messages</a>

@@ -70,14 +70,26 @@ if ($project && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && isset(
         } else {
             $doc_type = $_POST['document_type'] ?? 'other';
             if (!in_array($doc_type, ['proposal', 'report', 'zip', 'other'], true)) $doc_type = 'other';
+            
+            // Calculate next version number for this document type
+            $stmt = $pdo->prepare('SELECT MAX(version_number) as max_ver FROM project_documents WHERE project_id = ? AND document_type = ?');
+            $stmt->execute([$project['id'], $doc_type]);
+            $result = $stmt->fetch();
+            $next_version = ($result['max_ver'] ?? 0) + 1;
+            
             $safe_name = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file['name']);
             $safe_name = date('Ymd_His') . '_' . $safe_name;
             if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
             $path = $upload_dir . '/' . $safe_name;
             if (move_uploaded_file($file['tmp_name'], $path)) {
                 $rel = 'projects/' . $project['id'] . '/' . $safe_name;
-                $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, file_name, file_path, file_size, mime_type) VALUES (?, ?, ?, ?, ?, ?)');
-                $stmt->execute([$project['id'], $doc_type, $file['name'], $rel, $file['size'], $file['type']]);
+                
+                // Mark previous versions as not latest
+                $pdo->prepare('UPDATE project_documents SET is_latest = 0 WHERE project_id = ? AND document_type = ? AND is_latest = 1')->execute([$project['id'], $doc_type]);
+                
+                // Insert new version
+                $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, file_name, file_path, file_size, mime_type, uploader_id, version_number, is_latest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)');
+                $stmt->execute([$project['id'], $doc_type, $file['name'], $rel, $file['size'], $file['type'], $uid, $next_version]);
                 if ($project['supervisor_id']) {
                     $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$project['supervisor_id'], 'new_upload', 'New document uploaded', 'A student uploaded a document.', base_url('supervisor/students.php?pid=' . $project['id'])]);
                 }

@@ -45,7 +45,17 @@ A PHP/MySQL web application for managing final year projects with role-based acc
    - Password: `admin123`
 
 6. **Optional**: Add supervisors/HOD via Admin → Manage Users, or use the same SQL to insert users with role `supervisor` or `hod`.
+Supervisor
+Email: supervisor1@vault.edu
+Password: SupOne@2026
 
+Supervisor
+Email: supervisor2@vault.edu
+Password: SupTwo@2026
+
+HOD
+Email: hod@vault.edu
+Password: HodLead@2026
 ## Security Notes
 
 - Change the default admin password immediately.

@@ -151,7 +151,6 @@ CREATE TABLE notifications (
 ) ENGINE=InnoDB;
 
 -- Archive metadata for completed projects (read-only view)
-
 CREATE TABLE archive_metadata (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     project_id INT UNSIGNED NOT NULL UNIQUE,
@@ -159,6 +158,98 @@ CREATE TABLE archive_metadata (
     archived_by INT UNSIGNED NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (archived_by) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Student Groups (for collaborative projects)
+CREATE TABLE groups (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    created_by INT UNSIGNED NOT NULL,
+    academic_year VARCHAR(20) DEFAULT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_academic_year (academic_year),
+    INDEX idx_active (is_active)
+) ENGINE=InnoDB;
+
+-- Group Members
+CREATE TABLE group_members (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    group_id INT UNSIGNED NOT NULL,
+    student_id INT UNSIGNED NOT NULL,
+    role ENUM('lead', 'member') DEFAULT 'member',
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_group_member (group_id, student_id),
+    INDEX idx_group (group_id),
+    INDEX idx_student (student_id)
+) ENGINE=InnoDB;
+
+-- Link projects to groups (one group can have one project)
+ALTER TABLE projects ADD COLUMN group_id INT UNSIGNED DEFAULT NULL AFTER student_id;
+ALTER TABLE projects ADD FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE SET NULL;
+ALTER TABLE projects ADD INDEX idx_group (group_id);
+
+-- Enhanced Assessments with criteria scores
+ALTER TABLE assessments 
+ADD COLUMN research_quality DECIMAL(5,2) DEFAULT NULL,
+ADD COLUMN methodology DECIMAL(5,2) DEFAULT NULL,
+ADD COLUMN collaboration DECIMAL(5,2) DEFAULT NULL,
+ADD COLUMN presentation DECIMAL(5,2) DEFAULT NULL,
+ADD COLUMN originality DECIMAL(5,2) DEFAULT NULL,
+ADD COLUMN remarks TEXT,
+ADD COLUMN supervisor_confirmed TINYINT(1) DEFAULT 0,
+ADD COLUMN confirmed_at TIMESTAMP NULL,
+ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+
+-- Supervisor Log Sheets (meeting records)
+CREATE TABLE supervisor_logsheets (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    project_id INT UNSIGNED NOT NULL,
+    supervisor_id INT UNSIGNED NOT NULL,
+    meeting_date DATE NOT NULL,
+    student_attendees TEXT NOT NULL COMMENT 'Comma-separated student IDs or names',
+    topics_discussed TEXT NOT NULL,
+    action_points TEXT,
+    next_meeting_date DATE DEFAULT NULL,
+    supervisor_notes TEXT,
+    confirmed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_project (project_id),
+    INDEX idx_supervisor (supervisor_id),
+    INDEX idx_meeting_date (meeting_date)
+) ENGINE=InnoDB;
+
+-- Document Version Tracking (enhanced)
+ALTER TABLE project_documents 
+ADD COLUMN uploader_id INT UNSIGNED DEFAULT NULL AFTER project_id,
+ADD COLUMN version_number INT UNSIGNED DEFAULT 1,
+ADD COLUMN is_latest TINYINT(1) DEFAULT 1,
+ADD FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE SET NULL;
+
+-- CSV Bulk Import Log
+CREATE TABLE bulk_import_logs (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    import_type ENUM('users', 'pairings', 'topics') NOT NULL,
+    imported_by INT UNSIGNED NOT NULL,
+    file_name VARCHAR(255),
+    total_rows INT UNSIGNED,
+    successful_rows INT UNSIGNED,
+    failed_rows INT UNSIGNED,
+    error_details LONGTEXT,
+    status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL,
+    FOREIGN KEY (imported_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_type (import_type),
+    INDEX idx_status (status)
 ) ENGINE=InnoDB;
 
 -- Insert default admin (password: admin123 - CHANGE IN PRODUCTION)

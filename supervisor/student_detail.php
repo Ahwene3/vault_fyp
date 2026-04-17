@@ -59,6 +59,18 @@ require_once __DIR__ . '/../includes/header.php';
 <h1 class="mb-2"><?= e($project['student_name']) ?></h1>
 <p class="text-muted"><?= e($project['title']) ?> — <span class="badge bg-secondary"><?= e($project['status']) ?></span></p>
 
+<div class="mb-3">
+    <a href="<?= base_url('supervisor/logsheet.php?pid=' . $pid) ?>" class="btn btn-outline-primary me-2">
+        <i class="bi bi-journal-text"></i> Log Sheet
+    </a>
+    <a href="<?= base_url('supervisor/assessment.php?pid=' . $pid) ?>" class="btn btn-outline-success me-2">
+        <i class="bi bi-award"></i> Assessment Sheet
+    </a>
+    <a href="<?= base_url('supervisor/export_log.php?pid=' . $pid) ?>" class="btn btn-outline-secondary">
+        <i class="bi bi-download"></i> Export Activity Log
+    </a>
+</div>
+
 <ul class="nav nav-tabs mb-4" id="detailTabs" role="tablist">
     <li class="nav-item" role="presentation"><a class="nav-link active" data-bs-toggle="tab" href="#documents">Documents</a></li>
     <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#assessments">Assessments</a></li>
