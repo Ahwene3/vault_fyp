@@ -27,6 +27,20 @@ function require_login(): void {
         flash('error', 'Please log in to continue.');
         redirect(base_url('index.php'));
     }
+
+    $uid = user_id();
+    $fresh_user = $uid ? get_user_by_id($uid) : null;
+    if (!$fresh_user || (int) ($fresh_user['is_active'] ?? 1) !== 1) {
+        unset($_SESSION['user']);
+        regenerate_session();
+
+        $message = ((int) ($fresh_user['archived_permanent'] ?? 0) === 1)
+            ? 'Your account has been permanently archived and cannot be restored.'
+            : 'Your account is archived. Contact admin for restoration.';
+
+        flash('error', $message);
+        redirect(base_url('index.php'));
+    }
 }
 
 function require_role(string ...$roles): void {
@@ -59,7 +73,8 @@ function regenerate_session(): void {
 
 function get_user_by_id(int $id): ?array {
     $pdo = getPDO();
-    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, reg_number, phone, is_active, created_at FROM users WHERE id = ?');
+    ensure_user_archive_columns($pdo);
+    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, reg_number, phone, is_active, archived_permanent, archived_at, archived_by, created_at FROM users WHERE id = ?');
     $stmt->execute([$id]);
     $u = $stmt->fetch();
     return $u ?: null;

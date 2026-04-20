@@ -17,6 +17,18 @@ if (!$project) {
     redirect(base_url('supervisor/students.php'));
 }
 
+function assessment_recipient_ids(PDO $pdo, array $project): array {
+    $ids = [(int) $project['student_id']];
+    if (!empty($project['group_id'])) {
+        $stmt = $pdo->prepare('SELECT student_id FROM `group_members` WHERE group_id = ?');
+        $stmt->execute([(int) $project['group_id']]);
+        foreach ($stmt->fetchAll() as $m) {
+            $ids[] = (int) $m['student_id'];
+        }
+    }
+    return array_values(array_unique(array_filter($ids)));
+}
+
 $error = '';
 
 // Submit assessment form
@@ -44,8 +56,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
         $stmt = $pdo->prepare('INSERT INTO assessments (project_id, supervisor_id, assessment_type, research_quality, methodology, collaboration, presentation, originality, score, max_score, remarks, supervisor_confirmed, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 100, ?, 1, NOW()) ON DUPLICATE KEY UPDATE research_quality = VALUES(research_quality), methodology = VALUES(methodology), collaboration = VALUES(collaboration), presentation = VALUES(presentation), originality = VALUES(originality), score = VALUES(score), remarks = VALUES(remarks), supervisor_confirmed = 1, confirmed_at = NOW(), submitted_at = NOW()');
         $stmt->execute([$pid, $uid, $assessment_type, $research, $method, $collab, $present, $origin, $total, $remarks]);
         
-        // Notify student
-        $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$project['student_id'], 'assessment_submitted', 'Assessment completed', 'Your supervisor submitted a formal assessment for your project.', base_url('student/project.php')]);
+        // Notify all project members (solo student or group members).
+        foreach (assessment_recipient_ids($pdo, $project) as $member_id) {
+            $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([
+                $member_id,
+                'assessment_submitted',
+                'Assessment completed',
+                'Your supervisor submitted a formal assessment for your project.',
+                base_url('student/project.php')
+            ]);
+        }
         
         flash('success', 'Assessment sheet submitted and confirmed.');
         redirect(base_url('supervisor/assessment.php?pid=' . $pid));

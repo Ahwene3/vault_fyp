@@ -20,12 +20,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $department = trim($_POST['department'] ?? '');
         $full_name = trim($first_name . ' ' . $last_name) ?: null;
         
-        if (!$email || !$password || !$first_name || !$last_name) {
-            $error = 'Please fill in email, first name, last name, and password.';
+        if (!$first_name || !$last_name || !$password) {
+            $error = 'Please fill in first name, last name, and password.';
+        } elseif (!$email) {
+            $error = 'Email is required.';
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $error = 'Please enter a valid email address.';
-        } elseif (!preg_match('/^[A-Z]{3}\d{7}$/', $index_number)) {
-            $error = 'Index Number must start with 3 alphabetical letters followed by 7 numbers (e.g., ABC1234567).';
+        } elseif ($index_number && !preg_match('/^[A-Z]{3}\d{7}$/', $index_number)) {
+            $error = 'Index Number must be 3 uppercase letters followed by 7 numbers (e.g., ABC1234567).';
         } elseif (strlen($password) < 8) {
             $error = 'Password must be at least 8 characters.';
         } elseif (!preg_match('/[A-Z]/', $password)) {
@@ -242,8 +244,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="index_number">Index Number * <small style="color: rgba(255,255,255,0.6);">(ABC1234567)</small></label>
-                        <input type="text" id="index_number" name="index_number" required placeholder="ABC1234567" value="<?= e($_POST['index_number'] ?? '') ?>" pattern="[A-Z]{3}[0-9]{7}" title="Must be 3 uppercase letters followed by 7 numbers (e.g., ABC1234567)" maxlength="10">
+                        <label for="index_number">Index Number <small style="color: rgba(255,255,255,0.6);">(ABC1234567 - Optional)</small></label>
+                        <input type="text" id="index_number" name="index_number" placeholder="ABC1234567" value="<?= e($_POST['index_number'] ?? '') ?>" pattern="[A-Z]{3}[0-9]{7}" title="Must be 3 uppercase letters followed by 7 numbers (e.g., ABC1234567)" maxlength="10">
                         <div id="index-check" style="font-size: 0.75rem; margin-top: 0.35rem;"></div>
                     </div>
                     <div class="form-group">

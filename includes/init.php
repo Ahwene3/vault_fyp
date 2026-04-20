@@ -54,3 +54,138 @@ function flash(string $key, $value = null) {
 function e(?string $s): string {
     return $s === null ? '' : htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 }
+
+function sql_placeholders(int $count): string {
+    if ($count <= 0) {
+        return '';
+    }
+    return implode(',', array_fill(0, $count, '?'));
+}
+
+function ensure_departments_table(PDO $pdo): void {
+    $pdo->exec('CREATE TABLE IF NOT EXISTS departments (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        description TEXT,
+        is_active TINYINT(1) DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+}
+
+function ensure_user_archive_columns(PDO $pdo): void {
+    $required_columns = [
+        'archived_permanent' => 'ALTER TABLE users ADD COLUMN archived_permanent TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active',
+        'archived_at' => 'ALTER TABLE users ADD COLUMN archived_at TIMESTAMP NULL DEFAULT NULL AFTER archived_permanent',
+        'archived_by' => 'ALTER TABLE users ADD COLUMN archived_by INT UNSIGNED NULL DEFAULT NULL AFTER archived_at',
+    ];
+
+    $stmt = $pdo->prepare(
+        'SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = "users"
+           AND COLUMN_NAME IN (' . sql_placeholders(count($required_columns)) . ')'
+    );
+    $stmt->execute(array_keys($required_columns));
+
+    $existing_columns = array_map(
+        'strtolower',
+        array_column($stmt->fetchAll(), 'COLUMN_NAME')
+    );
+
+    foreach ($required_columns as $column_name => $ddl) {
+        if (in_array(strtolower($column_name), $existing_columns, true)) {
+            continue;
+        }
+
+        try {
+            $pdo->exec($ddl);
+        } catch (Throwable $e) {
+            if (stripos($e->getMessage(), 'duplicate column name') === false) {
+                throw $e;
+            }
+        }
+    }
+}
+
+/**
+ * Normalize a department reference that may be either department id or department name.
+ * Returns canonical id/name when available plus variants for resilient matching.
+ */
+function resolve_department_info(PDO $pdo, ?string $department): array {
+    ensure_departments_table($pdo);
+
+    $raw = trim((string) $department);
+    if ($raw === '') {
+        return [
+            'raw' => '',
+            'id' => null,
+            'name' => null,
+            'variants' => [],
+        ];
+    }
+
+    $variants = [strtolower($raw)];
+    $id = null;
+    $name = null;
+
+    if (ctype_digit($raw)) {
+        $id = (int) $raw;
+        $stmt = $pdo->prepare('SELECT name FROM departments WHERE id = ? AND is_active = 1 LIMIT 1');
+        $stmt->execute([$id]);
+        $name = $stmt->fetchColumn() ?: null;
+        if ($name) {
+            $variants[] = strtolower((string) $name);
+        }
+    } else {
+        $stmt = $pdo->prepare('SELECT id, name FROM departments WHERE LOWER(name) = LOWER(?) AND is_active = 1 LIMIT 1');
+        $stmt->execute([$raw]);
+        $row = $stmt->fetch();
+        if ($row) {
+            $id = (int) $row['id'];
+            $name = $row['name'];
+            $variants[] = strtolower((string) $id);
+            $variants[] = strtolower((string) $name);
+        }
+    }
+
+    $variants = array_values(array_unique(array_filter(array_map('trim', $variants), static function ($v) {
+        return $v !== '';
+    })));
+
+    return [
+        'raw' => $raw,
+        'id' => $id,
+        'name' => $name,
+        'variants' => $variants,
+    ];
+}
+
+function get_department_display_name(PDO $pdo, ?string $department): string {
+    $info = resolve_department_info($pdo, $department);
+    if (!empty($info['name'])) {
+        return (string) $info['name'];
+    }
+    return trim((string) $department);
+}
+
+function has_other_active_hod_in_department(PDO $pdo, string $department, int $excludeUserId = 0): bool {
+    $info = resolve_department_info($pdo, $department);
+    if (empty($info['variants'])) {
+        return false;
+    }
+
+    $placeholders = sql_placeholders(count($info['variants']));
+    $sql = 'SELECT id FROM users WHERE role = "hod" AND is_active = 1 AND LOWER(TRIM(COALESCE(department, ""))) IN (' . $placeholders . ')';
+    $params = $info['variants'];
+    if ($excludeUserId > 0) {
+        $sql .= ' AND id <> ?';
+        $params[] = $excludeUserId;
+    }
+    $sql .= ' LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return (bool) $stmt->fetchColumn();
+}

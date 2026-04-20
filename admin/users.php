@@ -3,19 +3,81 @@ require_once __DIR__ . '/../includes/auth.php';
 require_role('admin');
 
 $pdo = getPDO();
+ensure_departments_table($pdo);
+ensure_user_archive_columns($pdo);
+$departments = $pdo->query('SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name')->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     $action = $_POST['action'] ?? '';
     $target_id = (int) ($_POST['user_id'] ?? 0);
     if ($target_id && $target_id !== user_id()) {
-        if ($action === 'toggle_active' || $action === 'archive') {
-            $pdo->prepare('UPDATE users SET is_active = NOT is_active WHERE id = ?')->execute([$target_id]);
-            flash('success', 'User status updated.');
+        if (in_array($action, ['archive', 'restore', 'mark_permanent_archive'], true)) {
+            $stmt = $pdo->prepare('SELECT id, role, department, is_active, archived_permanent FROM users WHERE id = ? LIMIT 1');
+            $stmt->execute([$target_id]);
+            $target_user = $stmt->fetch();
+
+            if (!$target_user) {
+                flash('error', 'User not found.');
+                redirect(base_url('admin/users.php'));
+            }
+
+            if ($action === 'archive') {
+                if ((int) $target_user['is_active'] !== 1) {
+                    flash('error', 'User is already archived.');
+                    redirect(base_url('admin/users.php'));
+                }
+
+                $pdo->prepare('UPDATE users SET is_active = 0, archived_permanent = 0, archived_at = NOW(), archived_by = ? WHERE id = ?')
+                    ->execute([user_id(), $target_id]);
+                flash('success', 'User archived.');
+            } elseif ($action === 'restore') {
+                if ((int) $target_user['is_active'] === 1) {
+                    flash('error', 'User is already active.');
+                    redirect(base_url('admin/users.php'));
+                }
+
+                if ((int) $target_user['archived_permanent'] === 1) {
+                    flash('error', 'This account is permanently archived and cannot be restored.');
+                    redirect(base_url('admin/users.php'));
+                }
+
+                if ($target_user['role'] === 'hod') {
+                    $target_department = (string) ($target_user['department'] ?? '');
+                    $dept_info = resolve_department_info($pdo, $target_department);
+                    if (empty($dept_info['variants'])) {
+                        flash('error', 'Cannot restore HOD account with invalid or missing department.');
+                        redirect(base_url('admin/users.php'));
+                    }
+                    if (has_other_active_hod_in_department($pdo, $target_department, $target_id)) {
+                        flash('error', 'Cannot restore this HOD. The department already has an active HOD.');
+                        redirect(base_url('admin/users.php'));
+                    }
+                }
+
+                $pdo->prepare('UPDATE users SET is_active = 1, archived_permanent = 0, archived_at = NULL, archived_by = NULL WHERE id = ?')
+                    ->execute([$target_id]);
+                flash('success', 'User restored.');
+            } elseif ($action === 'mark_permanent_archive') {
+                if ((int) $target_user['is_active'] === 1) {
+                    flash('error', 'Only archived users can be permanently archived.');
+                    redirect(base_url('admin/users.php'));
+                }
+
+                if ((int) $target_user['archived_permanent'] === 1) {
+                    flash('error', 'User is already permanently archived.');
+                    redirect(base_url('admin/users.php'));
+                }
+
+                $pdo->prepare('UPDATE users SET archived_permanent = 1, archived_at = COALESCE(archived_at, NOW()), archived_by = COALESCE(archived_by, ?) WHERE id = ?')
+                    ->execute([user_id(), $target_id]);
+                flash('success', 'Archived user marked as permanent.');
+            }
         } elseif ($action === 'update_user') {
             $full_name = trim($_POST['full_name'] ?? '');
             $email = trim($_POST['email'] ?? '');
             $role = $_POST['role'] ?? 'supervisor';
             $department = trim($_POST['department'] ?? '');
+            $department_info = resolve_department_info($pdo, $department);
             $reg_number = trim($_POST['reg_number'] ?? '');
             $phone = trim($_POST['phone'] ?? '');
             $new_password = $_POST['new_password'] ?? '';
@@ -32,6 +94,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                 flash('error', 'Invalid role selected.');
                 redirect(base_url('admin/users.php?edit=' . $target_id));
             }
+            if (in_array($role, ['supervisor', 'hod'], true) && empty($department_info['variants'])) {
+                flash('error', 'A valid department is required for supervisors and HODs.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
+            if ($role === 'hod' && has_other_active_hod_in_department($pdo, $department, $target_id)) {
+                flash('error', 'This department already has an active HOD. One active HOD per department is allowed.');
+                redirect(base_url('admin/users.php?edit=' . $target_id));
+            }
 
             $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ? AND id <> ?');
             $stmt->execute([$email, $target_id]);
@@ -45,12 +115,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                 redirect(base_url('admin/users.php?edit=' . $target_id));
             }
 
+            $department_to_store = null;
+            if ($department !== '') {
+                $department_to_store = $department_info['id'] !== null ? (string) $department_info['id'] : $department;
+            }
+
             $pdo->prepare('UPDATE users SET full_name = ?, email = ?, role = ?, department = ?, reg_number = ?, phone = ? WHERE id = ?')
                 ->execute([
                     $full_name,
                     $email,
                     $role,
-                    $department ?: null,
+                    $department_to_store,
                     $reg_number ?: null,
                     $phone ?: null,
                     $target_id,
@@ -72,11 +147,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
     $email = trim($_POST['email'] ?? '');
     $full_name = trim($_POST['full_name'] ?? '');
     $role = $_POST['role'] ?? 'supervisor';
+    $department = trim($_POST['department'] ?? '');
+    $department_info = resolve_department_info($pdo, $department);
     $password = $_POST['password'] ?? '';
     if (!$email || !$full_name || !$password) {
         $add_error = 'Fill all fields.';
     } elseif (!in_array($role, ['supervisor', 'hod', 'admin'], true)) {
         $add_error = 'Invalid role.';
+    } elseif (in_array($role, ['supervisor', 'hod'], true) && empty($department_info['variants'])) {
+        $add_error = 'A valid department is required for supervisors and HODs.';
+    } elseif ($role === 'hod' && has_other_active_hod_in_department($pdo, $department)) {
+        $add_error = 'This department already has an active HOD. One active HOD per department is allowed.';
     } else {
         $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
         $stmt->execute([$email]);
@@ -84,7 +165,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
             $add_error = 'Email already in use.';
         } else {
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role) VALUES (?, ?, ?, ?)')->execute([$email, $hash, $full_name, $role]);
+            $department_to_store = null;
+            if ($department !== '') {
+                $department_to_store = $department_info['id'] !== null ? (string) $department_info['id'] : $department;
+            }
+            $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department) VALUES (?, ?, ?, ?, ?)')->execute([$email, $hash, $full_name, $role, $department_to_store]);
             flash('success', 'User added.');
             redirect(base_url('admin/users.php'));
         }
@@ -99,13 +184,78 @@ if ($edit_id > 0) {
     $edit_user = $stmt->fetch();
 }
 
-$users = $pdo->query('SELECT id, email, full_name, role, department, reg_number, phone, is_active, created_at FROM users ORDER BY role, full_name')->fetchAll();
+$active_hods = $pdo->query('SELECT id, full_name, department FROM users WHERE role = "hod" AND is_active = 1')->fetchAll();
+$invalid_active_hods = [];
+$normalized_hods = [];
+foreach ($active_hods as $h) {
+    $dept_info = resolve_department_info($pdo, (string) ($h['department'] ?? ''));
+    if (empty($dept_info['variants'])) {
+        $invalid_active_hods[] = [
+            'id' => (int) $h['id'],
+            'full_name' => $h['full_name'],
+            'department' => trim((string) ($h['department'] ?? '')),
+        ];
+    }
+
+    $normalized_hods[] = [
+        'full_name' => $h['full_name'],
+        'info' => $dept_info,
+    ];
+}
+
+$hod_coverage = [];
+foreach ($departments as $d) {
+    $dept_id = (int) $d['id'];
+    $dept_name = (string) $d['name'];
+    $dept_id_key = strtolower((string) $dept_id);
+    $dept_name_key = strtolower($dept_name);
+
+    $matched_hods = [];
+    foreach ($normalized_hods as $h) {
+        $variants = $h['info']['variants'];
+        if (in_array($dept_id_key, $variants, true) || in_array($dept_name_key, $variants, true)) {
+            $matched_hods[] = $h['full_name'];
+        }
+    }
+
+    $hod_coverage[] = [
+        'id' => $dept_id,
+        'name' => $dept_name,
+        'active_hod_count' => count($matched_hods),
+        'active_hods' => implode(', ', $matched_hods),
+    ];
+}
+
+$edit_department_id = '';
+$edit_department_legacy = '';
+if ($edit_user) {
+    $edit_dept_info = resolve_department_info($pdo, (string) ($edit_user['department'] ?? ''));
+    if ($edit_dept_info['id'] !== null) {
+        $edit_department_id = (string) $edit_dept_info['id'];
+    } else {
+        $edit_department_legacy = trim((string) ($edit_user['department'] ?? ''));
+    }
+}
+
+$active_users = $pdo->query('SELECT id, email, full_name, role, department, reg_number, phone, is_active, created_at FROM users WHERE is_active = 1 ORDER BY role, full_name')->fetchAll();
+$archived_users = $pdo->query('SELECT u.id, u.email, u.full_name, u.role, u.department, u.reg_number, u.phone, u.is_active, u.archived_permanent, u.archived_at, u.archived_by, u.created_at, ab.full_name AS archived_by_name FROM users u LEFT JOIN users ab ON ab.id = u.archived_by WHERE u.is_active = 0 ORDER BY COALESCE(u.archived_at, u.created_at) DESC, u.full_name')->fetchAll();
 
 $pageTitle = 'Manage Users';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <h1 class="mb-4">Manage Users</h1>
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Bulk User Addition</span>
+        <a href="<?= base_url('admin/import_users.php?download=template') ?>" class="btn btn-sm btn-outline-secondary">Download CSV Template</a>
+    </div>
+    <div class="card-body">
+        <p class="mb-3">Add multiple supervisors and HOD accounts from this Users management flow using a CSV upload.</p>
+        <a href="<?= base_url('admin/import_users.php') ?>" class="btn btn-primary">Open Bulk Add Users</a>
+    </div>
+</div>
 
 <div class="card mb-4">
     <div class="card-header">Add User (Supervisor / HOD / Admin)</div>
@@ -117,9 +267,52 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="col-md-3"><label class="form-label">Email</label><input type="email" name="email" class="form-control" required></div>
             <div class="col-md-2"><label class="form-label">Password</label><input type="password" name="password" class="form-control" required minlength="8"></div>
             <div class="col-md-2"><label class="form-label">Role</label><select name="role" class="form-select"><option value="supervisor">Supervisor</option><option value="hod">HOD</option><option value="admin">Admin</option></select></div>
-            <div class="col-md-2 d-flex align-items-end"><button type="submit" class="btn btn-primary">Add</button></div>
+            <div class="col-md-2"><label class="form-label">Department</label><select name="department" class="form-select"><option value="">Select...</option><?php foreach ($departments as $d): ?><option value="<?= (int) $d['id'] ?>"><?= e($d['name']) ?></option><?php endforeach; ?></select></div>
+            <div class="col-12"><button type="submit" class="btn btn-primary">Add</button></div>
         </form>
         <?php if ($add_error): ?><p class="text-danger mt-2 mb-0"><?= e($add_error) ?></p><?php endif; ?>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header">Department HOD Coverage</div>
+    <div class="card-body">
+        <?php if (!empty($invalid_active_hods)): ?>
+            <div class="alert alert-danger">
+                <strong>Invalid active HOD assignment detected.</strong>
+                <?php foreach ($invalid_active_hods as $bad_hod): ?>
+                    <div>
+                        <?= e($bad_hod['full_name']) ?> (ID <?= (int) $bad_hod['id'] ?>) has <?= e($bad_hod['department'] !== '' ? $bad_hod['department'] : 'no department') ?>.
+                        Update this account with a valid department from the edit form.
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead><tr><th>Department</th><th>Active HODs</th><th>Assigned HOD</th><th>Status</th></tr></thead>
+                <tbody>
+                    <?php foreach ($hod_coverage as $hc): ?>
+                        <?php $count = (int) ($hc['active_hod_count'] ?? 0); ?>
+                        <tr>
+                            <td><?= e($hc['name']) ?></td>
+                            <td><?= $count ?></td>
+                            <td><?= e($hc['active_hods'] ?: '—') ?></td>
+                            <td>
+                                <?php if ($count === 1): ?>
+                                    <span class="badge bg-success">OK</span>
+                                <?php elseif ($count === 0): ?>
+                                    <span class="badge bg-warning text-dark">Missing HOD</span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger">Multiple HODs</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
@@ -155,7 +348,15 @@ require_once __DIR__ . '/../includes/header.php';
 
             <div class="col-md-4">
                 <label class="form-label">Department</label>
-                <input type="text" name="department" class="form-control" value="<?= e($edit_user['department'] ?? '') ?>">
+                <select name="department" class="form-select">
+                    <option value="">Select...</option>
+                    <?php foreach ($departments as $d): ?>
+                        <option value="<?= (int) $d['id'] ?>" <?= $edit_department_id === (string) $d['id'] ? 'selected' : '' ?>><?= e($d['name']) ?></option>
+                    <?php endforeach; ?>
+                    <?php if ($edit_department_legacy !== ''): ?>
+                        <option value="<?= e($edit_department_legacy) ?>" selected><?= e($edit_department_legacy) ?> (legacy)</option>
+                    <?php endif; ?>
+                </select>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Reg. Number</label>
@@ -178,33 +379,103 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 <?php endif; ?>
 
-<div class="card">
+<div class="card mb-4">
+    <div class="card-header">Active Users</div>
     <div class="card-body">
-        <table class="table">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Active</th><th>Actions</th></tr></thead>
-            <tbody>
-                <?php foreach ($users as $u): ?>
-                    <tr>
-                        <td><?= e($u['full_name']) ?></td>
-                        <td><?= e($u['email']) ?></td>
-                        <td><span class="badge bg-secondary"><?= e($u['role']) ?></span></td>
-                        <td><?= e($u['department'] ?? '—') ?></td>
-                        <td><?= $u['is_active'] ? 'Yes' : 'No' ?></td>
-                        <td>
-                            <?php if ($u['id'] != user_id()): ?>
-                                <a href="<?= base_url('admin/users.php?edit=' . $u['id']) ?>" class="btn btn-sm btn-outline-primary">Edit</a>
-                                <form method="post" class="d-inline">
-                                    <?= csrf_field() ?>
-                                    <input type="hidden" name="action" value="archive">
-                                    <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-warning"><?= $u['is_active'] ? 'Archive' : 'Restore' ?></button>
-                                </form>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Actions</th></tr></thead>
+                <tbody>
+                    <?php foreach ($active_users as $u): ?>
+                        <tr>
+                            <td><?= e($u['full_name']) ?></td>
+                            <td><?= e($u['email']) ?></td>
+                            <td><span class="badge bg-secondary"><?= e($u['role']) ?></span></td>
+                            <td><?= e(($u['department'] ?? '') !== '' ? get_department_display_name($pdo, (string) $u['department']) : '—') ?></td>
+                            <td>
+                                <?php if ($u['id'] != user_id()): ?>
+                                    <a href="<?= base_url('admin/users.php?edit=' . $u['id']) ?>" class="btn btn-sm btn-outline-primary">Edit</a>
+                                    <form method="post" class="d-inline">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="action" value="archive">
+                                        <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">Archive</button>
+                                    </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Archived Users</span>
+        <small class="text-muted">Permanently archived accounts are locked and cannot be restored.</small>
+    </div>
+    <div class="card-body">
+        <?php if (empty($archived_users)): ?>
+            <p class="text-muted mb-0">No archived users.</p>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Department</th>
+                            <th>Archived On</th>
+                            <th>Archived By</th>
+                            <th>Permanent</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($archived_users as $u): ?>
+                            <tr>
+                                <td><?= e($u['full_name']) ?></td>
+                                <td><?= e($u['email']) ?></td>
+                                <td><span class="badge bg-secondary"><?= e($u['role']) ?></span></td>
+                                <td><?= e(($u['department'] ?? '') !== '' ? get_department_display_name($pdo, (string) $u['department']) : '—') ?></td>
+                                <td><?= e($u['archived_at'] ?? '—') ?></td>
+                                <td><?= e($u['archived_by_name'] ?? '—') ?></td>
+                                <td>
+                                    <?php if ((int) ($u['archived_permanent'] ?? 0) === 1): ?>
+                                        <span class="badge bg-dark">Yes</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-light text-dark">No</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($u['id'] != user_id()): ?>
+                                        <?php if ((int) ($u['archived_permanent'] ?? 0) === 1): ?>
+                                            <span class="badge bg-dark">Locked</span>
+                                        <?php else: ?>
+                                            <form method="post" class="d-inline">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="action" value="restore">
+                                                <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-success">Restore</button>
+                                            </form>
+                                            <form method="post" class="d-inline" onsubmit="return confirm('Mark this account as permanently archived? This cannot be undone.');">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="action" value="mark_permanent_archive">
+                                                <input type="hidden" name="user_id" value="<?= (int) $u['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">Permanent</button>
+                                            </form>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 

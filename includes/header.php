@@ -29,7 +29,7 @@ $user = current_user();
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('student/logbook.php') ?>">Logbook</a></li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('messages.php') ?>">Messages</a></li>
                         <?php elseif ($user['role'] === 'supervisor'): ?>
-                            <li class="nav-item"><a class="nav-link" href="<?= base_url('supervisor/students.php') ?>">My Students</a></li>
+                            <li class="nav-item"><a class="nav-link" href="<?= base_url('supervisor/students.php') ?>">Group Vaults</a></li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('messages.php') ?>">Messages</a></li>
                         <?php elseif ($user['role'] === 'hod'): ?>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('hod/topics.php') ?>">Topic Approval</a></li>
@@ -38,6 +38,7 @@ $user = current_user();
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('hod/reports.php') ?>">Reports</a></li>
                         <?php elseif ($user['role'] === 'admin'): ?>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('admin/users.php') ?>">Users</a></li>
+                            <li class="nav-item"><a class="nav-link" href="<?= base_url('admin/reports.php') ?>">Reports</a></li>
                             <li class="nav-item"><a class="nav-link" href="<?= base_url('vault.php') ?>">Vault</a></li>
                         <?php endif; ?>
                         <li class="nav-item"><a class="nav-link" href="<?= base_url('vault.php') ?>">Project Vault</a></li>
@@ -51,8 +52,10 @@ $user = current_user();
                         $unread_count = (int) $stmt->fetchColumn();
                     ?>
                         <li class="nav-item">
-                            <a class="nav-link position-relative" href="<?= base_url('notifications.php') ?>">
-                                <i class="bi bi-bell"></i>
+                            <a class="nav-link position-relative notification-link" href="<?= base_url('notifications.php') ?>" aria-label="View notifications">
+                                <svg class="notification-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                                    <path d="M8 16a2 2 0 0 0 1.985-1.75h-3.97A2 2 0 0 0 8 16Zm.104-14.995a1 1 0 0 0-.208 0A2.5 2.5 0 0 0 5.5 3.5v.628c0 .54-.214 1.058-.595 1.439L4.12 6.352A2.5 2.5 0 0 0 3.5 8.12V10l-.809 1.213A.75.75 0 0 0 3.309 12.5h9.382a.75.75 0 0 0 .618-1.287L12.5 10V8.12a2.5 2.5 0 0 0-.62-1.768l-.785-.785A2.034 2.034 0 0 1 10.5 4.128V3.5a2.5 2.5 0 0 0-2.396-2.495Z"/>
+                                </svg>
                                 <?php if ($unread_count): ?><span class="notification-badge badge bg-danger rounded-pill"><?= $unread_count ?></span><?php endif; ?>
                             </a>
                         </li>

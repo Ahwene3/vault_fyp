@@ -39,6 +39,42 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Rotate short tips to make navigation feel welcoming
     var tipEl = document.getElementById('js-fun-tip');
+    var quickNavBar = document.querySelector('.quick-nav-bar');
+    var profileDropdown = document.getElementById('userDropdown');
+
+    function setProfileMenuState(isOpen) {
+        if (quickNavBar) {
+            quickNavBar.classList.toggle('nav-hidden-for-dropdown', isOpen);
+        }
+        if (tipEl) {
+            tipEl.classList.toggle('tip-hidden', isOpen);
+        }
+    }
+
+    if (profileDropdown) {
+        var profileDropdownParent = profileDropdown.closest('.dropdown');
+
+        profileDropdown.addEventListener('show.bs.dropdown', function() {
+            setProfileMenuState(true);
+        });
+
+        profileDropdown.addEventListener('hide.bs.dropdown', function() {
+            setProfileMenuState(false);
+        });
+
+        profileDropdown.addEventListener('click', function() {
+            setTimeout(function() {
+                setProfileMenuState(profileDropdown.getAttribute('aria-expanded') === 'true');
+            }, 0);
+        });
+
+        document.addEventListener('click', function(e) {
+            if (profileDropdownParent && !profileDropdownParent.contains(e.target)) {
+                setProfileMenuState(false);
+            }
+        });
+    }
+
     if (tipEl) {
         var tips = [
             'Tip: Use Back and Forward to move quickly through your workflow.',

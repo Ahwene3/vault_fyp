@@ -16,14 +16,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Please enter email and password.';
         } else {
             $pdo = getPDO();
-            $stmt = $pdo->prepare('SELECT id, email, password_hash, full_name, role FROM users WHERE email = ?');
+            ensure_user_archive_columns($pdo);
+            $stmt = $pdo->prepare('SELECT id, email, password_hash, full_name, role, department, is_active, archived_permanent FROM users WHERE email = ?');
             $stmt->execute([$email]);
             $user = $stmt->fetch();
             if ($user && password_verify($password, $user['password_hash'])) {
-                login_user($user);
-                redirect(base_url('dashboard.php'));
+                if ((int) ($user['is_active'] ?? 1) !== 1) {
+                    $error = ((int) ($user['archived_permanent'] ?? 0) === 1)
+                        ? 'Your account has been permanently archived and cannot be restored.'
+                        : 'Your account is archived. Contact admin for restoration.';
+                } else {
+                    login_user($user);
+                    redirect(base_url('dashboard.php'));
+                }
+            } else {
+                $error = 'Invalid email or password.';
             }
-            $error = 'Invalid email or password.';
         }
     }
 }
