@@ -16,14 +16,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $first_name = trim($_POST['first_name'] ?? '');
         $last_name = trim($_POST['last_name'] ?? '');
         $level = trim($_POST['level'] ?? '');
-        $reg_number = trim($_POST['reg_number'] ?? '');
+        $index_number = trim($_POST['index_number'] ?? '');
         $department = trim($_POST['department'] ?? '');
         $full_name = trim($first_name . ' ' . $last_name) ?: null;
         
         if (!$email || !$password || !$first_name || !$last_name) {
             $error = 'Please fill in email, first name, last name, and password.';
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $error = 'Invalid email address.';
+            $error = 'Please enter a valid email address.';
+        } elseif (!preg_match('/^[A-Z]{3}\d{7}$/', $index_number)) {
+            $error = 'Index Number must start with 3 alphabetical letters followed by 7 numbers (e.g., ABC1234567).';
         } elseif (strlen($password) < 8) {
             $error = 'Password must be at least 8 characters.';
         } elseif (!preg_match('/[A-Z]/', $password)) {
@@ -43,7 +45,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $hash = password_hash($password, PASSWORD_DEFAULT);
                 $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, reg_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt->execute([$email, $hash, $full_name, $first_name, $last_name, $level ?: null, 'student', $department ?: null, $reg_number ?: null]);
+                $stmt->execute([$email, $hash, $full_name, $first_name, $last_name, $level ?: null, 'student', $department ?: null, $index_number ?: null]);
+                
+                // TODO: Email sending disabled for now - will integrate properly later
+                // send_registration_email($email, $first_name);
+                
                 flash('success', 'Registration successful. Log in now.');
                 redirect(base_url('index.php'));
             }
@@ -147,6 +153,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 0.95rem;
             transition: all 0.3s;
         }
+        .form-group select option {
+            color: #000;
+            background: #fff;
+        }
         .form-group input:focus, .form-group select:focus {
             outline: none;
             background: rgba(255, 255, 255, 0.12);
@@ -172,7 +182,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .password-wrapper button:hover { color: rgba(255, 255, 255, 0.8); }
         .form-group input[type="password"] { padding-right: 2.75rem; }
         .pw-check { font-size: 0.75rem; margin-top: 0.5rem; color: rgba(255, 255, 255, 0.6); display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-        .pw-check.met { color: #10b981; }
+        .pw-check span { display: flex; align-items: center; gap: 0.35rem; transition: color 0.2s; }
+        .pw-check span.met { color: #10b981; }
+        .pw-check i { font-size: 0.65rem; }
         .btn-submit {
             width: 100%;
             padding: 0.875rem;
@@ -226,16 +238,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 <div class="form-group">
                     <label for="email">Email *</label>
-                    <input type="email" id="email" name="email" required placeholder="john@example.com" value="<?= e($_POST['email'] ?? '') ?>">
+                    <input type="email" id="email" name="email" required placeholder="your.email@example.com" value="<?= e($_POST['email'] ?? '') ?>">
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="reg_number">Reg. Number</label>
-                        <input type="text" id="reg_number" name="reg_number" placeholder="RMU/2024/001" value="<?= e($_POST['reg_number'] ?? '') ?>">
+                        <label for="index_number">Index Number * <small style="color: rgba(255,255,255,0.6);">(ABC1234567)</small></label>
+                        <input type="text" id="index_number" name="index_number" required placeholder="ABC1234567" value="<?= e($_POST['index_number'] ?? '') ?>" pattern="[A-Z]{3}[0-9]{7}" title="Must be 3 uppercase letters followed by 7 numbers (e.g., ABC1234567)" maxlength="10">
+                        <div id="index-check" style="font-size: 0.75rem; margin-top: 0.35rem;"></div>
                     </div>
                     <div class="form-group">
-                        <label for="level">Level</label>
-                        <select id="level" name="level">
+                        <label for="level">Level *</label>
+                        <select id="level" name="level" required>
                             <option value="">Select level</option>
                             <option value="100" <?= ($_POST['level'] ?? '') === '100' ? 'selected' : '' ?>>100</option>
                             <option value="200" <?= ($_POST['level'] ?? '') === '200' ? 'selected' : '' ?>>200</option>
@@ -245,20 +258,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </div>
                 <div class="form-group">
-                    <label for="department">Department</label>
-                    <input type="text" id="department" name="department" placeholder="e.g. Marine Engineering" value="<?= e($_POST['department'] ?? '') ?>">
+                    <label for="department">Department *</label>
+                    <select id="department" name="department" required>
+                        <option value="">Select department</option>
+                        <?php
+                        $pdo = getPDO();
+                        $stmt = $pdo->prepare('SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name');
+                        $stmt->execute();
+                        while ($dept = $stmt->fetch()) {
+                            $selected = ($_POST['department'] ?? '') === $dept['id'] ? 'selected' : '';
+                            echo '<option value="' . htmlspecialchars($dept['id']) . '" ' . $selected . '>' . htmlspecialchars($dept['name']) . '</option>';
+                        }
+                        ?>
+                    </select>
                 </div>
                 <div class="form-group">
-                    <label for="password">Password *</label>
+                    <label for="password">Password * <small style="color: rgba(255,255,255,0.6);">(Show requirements below)</small></label>
                     <div class="password-wrapper">
                         <input type="password" id="password" name="password" required minlength="8" placeholder="••••••••" autocomplete="new-password">
                         <button type="button" id="togglePw"><i class="bi bi-eye-fill"></i></button>
                     </div>
                     <div id="pw-check" class="pw-check">
-                        <span id="req-length"><i class="bi bi-circle-fill"></i> 8+ chars</span>
-                        <span id="req-upper"><i class="bi bi-circle-fill"></i> Uppercase</span>
-                        <span id="req-lower"><i class="bi bi-circle-fill"></i> Lowercase</span>
-                        <span id="req-number"><i class="bi bi-circle-fill"></i> Number</span>
+                        <span id="req-length"><i class="bi bi-circle-fill"></i> <span>8+ chars</span></span>
+                        <span id="req-upper"><i class="bi bi-circle-fill"></i> <span>Uppercase</span></span>
+                        <span id="req-lower"><i class="bi bi-circle-fill"></i> <span>Lowercase</span></span>
+                        <span id="req-number"><i class="bi bi-circle-fill"></i> <span>Number</span></span>
                     </div>
                 </div>
                 <div class="form-group">
@@ -298,12 +322,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 icon.className = 'bi bi-eye-fill';
             }
         });
+        // Index Number validation and formatting
+        document.getElementById('index_number').addEventListener('input', function() {
+            this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            if (this.value.length > 3) {
+                const letters = this.value.substring(0, 3);
+                const numbers = this.value.substring(3).replace(/[^0-9]/g, '').substring(0, 7);
+                this.value = letters + numbers;
+            }
+            
+            // Show validation status
+            const check = document.getElementById('index-check');
+            if (!this.value) {
+                check.textContent = '';
+            } else if (/^[A-Z]{3}[0-9]{7}$/.test(this.value)) {
+                check.innerHTML = '<span style="color: #10b981;"><i class="bi bi-check-circle-fill"></i> Valid format</span>';
+            } else if (this.value.length < 10) {
+                check.innerHTML = '<span style="color: #f97316;"><i class="bi bi-info-circle-fill"></i> Format: 3 letters + 7 numbers</span>';
+            } else {
+                check.innerHTML = '<span style="color: #fca5a5;"><i class="bi bi-x-circle-fill"></i> Invalid format</span>';
+            }
+        });
         document.getElementById('password').addEventListener('input', function() {
             const pwd = this.value;
-            document.getElementById('req-length').className = pwd.length >= 8 ? 'met' : '';
-            document.getElementById('req-upper').className = /[A-Z]/.test(pwd) ? 'met' : '';
-            document.getElementById('req-lower').className = /[a-z]/.test(pwd) ? 'met' : '';
-            document.getElementById('req-number').className = /[0-9]/.test(pwd) ? 'met' : '';
+            const reqLength = document.getElementById('req-length');
+            const reqUpper = document.getElementById('req-upper');
+            const reqLower = document.getElementById('req-lower');
+            const reqNumber = document.getElementById('req-number');
+            
+            pwd.length >= 8 ? reqLength.classList.add('met') : reqLength.classList.remove('met');
+            /[A-Z]/.test(pwd) ? reqUpper.classList.add('met') : reqUpper.classList.remove('met');
+            /[a-z]/.test(pwd) ? reqLower.classList.add('met') : reqLower.classList.remove('met');
+            /[0-9]/.test(pwd) ? reqNumber.classList.add('met') : reqNumber.classList.remove('met');
+            
+            // Update password confirm match
+            const pwConfirm = document.getElementById('password_confirm');
+            if (pwConfirm.value) {
+                const match = document.getElementById('match-check');
+                if (this.value === pwConfirm.value) {
+                    match.innerHTML = '<span style="color: #10b981;"><i class="bi bi-check-circle-fill"></i> Passwords match</span>';
+                } else {
+                    match.innerHTML = '<span style="color: #fca5a5;"><i class="bi bi-x-circle-fill"></i> Passwords do not match</span>';
+                }
+            }
         });
         document.getElementById('password_confirm').addEventListener('input', function() {
             const pwd = document.getElementById('password').value;

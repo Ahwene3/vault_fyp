@@ -18,21 +18,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
         if ($stmt->fetch()) {
             if ($action === 'approve') {
                 $pdo->prepare('UPDATE projects SET status = "approved", approved_at = NOW(), approved_by = ?, rejection_reason = NULL WHERE id = ?')->execute([$uid, $project_id]);
-                $stmt = $pdo->prepare('SELECT student_id FROM projects WHERE id = ?');
+                $stmt = $pdo->prepare('SELECT student_id, title FROM projects WHERE id = ?');
                 $stmt->execute([$project_id]);
-                $row = $stmt->fetch();
-                if ($row) {
-                    $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$row['student_id'], 'topic_approved', 'Topic approved', 'Your project topic has been approved.', base_url('student/project.php')]);
+                $proj = $stmt->fetch();
+                if ($proj) {
+                    $stmt = $pdo->prepare('SELECT email, first_name FROM users WHERE id = ?');
+                    $stmt->execute([$proj['student_id']]);
+                    $student = $stmt->fetch();
+                    
+                    // TODO: Email notification disabled for now - will integrate properly later
+                    // if ($student) {
+                    //     send_topic_approval_email($student['email'], $student['first_name'], $proj['title']);
+                    // }
+                    
+                    $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$proj['student_id'], 'topic_approved', 'Topic approved', 'Your project topic has been approved.', base_url('student/project.php')]);
                 }
                 flash('success', 'Topic approved.');
             } else {
                 $reason = trim($_POST['rejection_reason'] ?? '');
                 $pdo->prepare('UPDATE projects SET status = "rejected", approved_by = ?, rejection_reason = ? WHERE id = ?')->execute([$uid, $reason ?: null, $project_id]);
-                $stmt = $pdo->prepare('SELECT student_id FROM projects WHERE id = ?');
+                $stmt = $pdo->prepare('SELECT student_id, title FROM projects WHERE id = ?');
                 $stmt->execute([$project_id]);
-                $row = $stmt->fetch();
-                if ($row) {
-                    $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$row['student_id'], 'topic_rejected', 'Topic rejected', 'Your project topic was rejected. You may resubmit.', base_url('student/project.php')]);
+                $proj = $stmt->fetch();
+                if ($proj) {
+                    $stmt = $pdo->prepare('SELECT email, first_name FROM users WHERE id = ?');
+                    $stmt->execute([$proj['student_id']]);
+                    $student = $stmt->fetch();
+                    
+                    // TODO: Email notification disabled for now - will integrate properly later
+                    // if ($student) {
+                    //     send_topic_rejection_email($student['email'], $student['first_name'], $proj['title'], $reason);
+                    // }
+                    
+                    $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$proj['student_id'], 'topic_rejected', 'Topic rejected', 'Your project topic was rejected. You may resubmit.', base_url('student/project.php')]);
                 }
                 flash('success', 'Topic rejected.');
             }

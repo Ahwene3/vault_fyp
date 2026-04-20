@@ -5,6 +5,7 @@
 session_start();
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/mail.php';
 
 // Error reporting (disable in production)
 error_reporting(E_ALL);
