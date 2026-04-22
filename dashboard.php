@@ -69,6 +69,7 @@ if ($role === 'student') {
     $stats['department_error'] = empty($hod_department_info['variants'])
         ? 'Your HOD account does not have a valid department configured. Contact admin.'
         : '';
+    $stats['ongoing_projects'] = [];
 
     if (!empty($hod_department_info['variants'])) {
         $dept_placeholders = sql_placeholders(count($hod_department_info['variants']));
@@ -83,10 +84,36 @@ if ($role === 'student') {
 
         $count_stmt->execute(array_merge(['completed'], $hod_department_info['variants']));
         $stats['completed'] = (int) $count_stmt->fetchColumn();
+
+        $stmt = $pdo->prepare('SELECT
+            p.id,
+            p.title,
+            p.status,
+            p.updated_at,
+            p.group_id,
+            COALESCE(g.name, CONCAT("Solo Vault - ", lead_u.full_name)) AS vault_name,
+            lead_u.full_name AS lead_name,
+            lead_u.reg_number AS lead_reg_number,
+            lead_u.email AS lead_email,
+            sup_u.full_name AS supervisor_name,
+            (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+                FROM `group_members` gm2
+                JOIN users u2 ON u2.id = gm2.student_id
+                WHERE gm2.group_id = p.group_id) AS member_directory
+            FROM projects p
+            JOIN users lead_u ON lead_u.id = p.student_id
+            LEFT JOIN users sup_u ON sup_u.id = p.supervisor_id
+            LEFT JOIN `groups` g ON g.id = p.group_id
+            WHERE p.status IN ("approved","in_progress")
+                AND LOWER(TRIM(COALESCE(lead_u.department, ""))) IN (' . $dept_placeholders . ')
+            ORDER BY p.updated_at DESC');
+        $stmt->execute($hod_department_info['variants']);
+        $stats['ongoing_projects'] = $stmt->fetchAll();
     } else {
         $stats['pending_topics'] = 0;
         $stats['ongoing'] = 0;
         $stats['completed'] = 0;
+        $stats['ongoing_projects'] = [];
     }
 } elseif ($role === 'admin') {
     $stmt = $pdo->query('SELECT COUNT(*) FROM users');
@@ -272,6 +299,47 @@ require_once __DIR__ . '/includes/header.php';
             </a>
         </div>
     </div>
+    <div class="card mb-4">
+        <div class="card-header">Ongoing Projects and Assigned Supervisors</div>
+        <div class="card-body">
+            <?php if (empty($stats['ongoing_projects'])): ?>
+                <p class="text-muted mb-0">No ongoing projects in your department.</p>
+            <?php else: ?>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Vault</th>
+                                <th>Project</th>
+                                <th>Members / Index</th>
+                                <th>Supervisor</th>
+                                <th>Status</th>
+                                <th>Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($stats['ongoing_projects'] as $p): ?>
+                                <tr>
+                                    <td><?= e($p['vault_name']) ?></td>
+                                    <td><?= e($p['title']) ?></td>
+                                    <td>
+                                        <?php if (!empty($p['group_id'])): ?>
+                                            <small><?= e($p['member_directory'] ?: '—') ?></small>
+                                        <?php else: ?>
+                                            <?= e(($p['lead_name'] ?? '—') . ' (' . (($p['lead_reg_number'] ?: $p['lead_email']) ?: '—') . ')') ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?= e($p['supervisor_name'] ?: 'Not assigned') ?></td>
+                                    <td><span class="badge bg-secondary"><?= e(str_replace('_', ' ', (string) $p['status'])) ?></span></td>
+                                    <td><?= !empty($p['updated_at']) ? e(date('M j, Y', strtotime((string) $p['updated_at']))) : '—' ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
     <div class="card">
         <div class="card-header">Quick Actions</div>
         <div class="card-body">
@@ -298,7 +366,7 @@ require_once __DIR__ . '/includes/header.php';
             </a>
         </div>
         <div class="col-md-6">
-            <a href="<?= base_url('vault.php') ?>" class="text-decoration-none text-reset d-block h-100">
+            <a href="<?= base_url('admin/projects.php') ?>" class="text-decoration-none text-reset d-block h-100">
                 <div class="card stat-card h-100">
                     <div class="card-body d-flex align-items-center">
                         <div class="text-success me-3"><i class="bi bi-folder"></i></div>
@@ -316,7 +384,7 @@ require_once __DIR__ . '/includes/header.php';
         <div class="card-body">
             <a href="<?= base_url('admin/users.php') ?>" class="btn btn-primary me-2">Manage Users</a>
             <a href="<?= base_url('admin/reports.php') ?>" class="btn btn-outline-primary me-2">Audit Reports</a>
-            <a href="<?= base_url('vault.php') ?>" class="btn btn-outline-primary">Project Vault</a>
+            <a href="<?= base_url('admin/projects.php') ?>" class="btn btn-outline-primary">Project Status</a>
         </div>
     </div>
 <?php endif; ?>
