@@ -111,11 +111,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             position: relative;
             z-index: 10;
             width: 100%;
-            max-width: 520px;
+            max-width: 980px;
+            display: grid;
+            grid-template-columns: 1.05fr 1fr;
+            gap: 2.5rem;
+            align-items: center;
+        }
+        .register-visual {
+            display: grid;
+            gap: 1.5rem;
+        }
+        .register-visual img {
+            width: 100%;
+            border-radius: 1.5rem;
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.4);
         }
         .register-header {
-            text-align: center;
-            margin-bottom: 2rem;
+            text-align: left;
         }
         .register-header h1 {
             font-size: 1.8rem;
@@ -213,13 +225,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .divider::before { content: ''; display: block; height: 1px; background: rgba(255, 255, 255, 0.1); margin-bottom: 0.75rem; }
         .link { text-align: center; }
         .link a { color: var(--primary); text-decoration: none; }
+        @media (max-width: 900px) {
+            .register-container {
+                grid-template-columns: 1fr;
+            }
+            .register-header {
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="register-container">
-        <div class="register-header">
-            <h1>Join FYP Vault</h1>
-            <p>Create your account to submit final year project</p>
+        <div class="register-visual">
+            <img src="<?= base_url('assets/images/vault.svg') ?>" alt="Vault illustration">
+            <div class="register-header">
+                <h1>Join FYP Vault</h1>
+                <p>Create your account to submit final year project</p>
+            </div>
         </div>
         <div class="register-form-wrapper">
             <h2>Create Account</h2>
