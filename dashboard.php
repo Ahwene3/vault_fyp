@@ -122,12 +122,52 @@ if ($role === 'student') {
     $stats['projects_count'] = (int) $stmt->fetchColumn();
 }
 
+$sidebar_links = [
+    ['label' => 'Dashboard', 'href' => 'dashboard.php', 'icon' => 'bi-speedometer2', 'active' => true],
+];
+
+if ($role === 'student') {
+    $sidebar_links[] = ['label' => 'My Group', 'href' => 'student/group.php', 'icon' => 'bi-people'];
+    $sidebar_links[] = ['label' => 'My Project', 'href' => 'student/project.php', 'icon' => 'bi-journal-richtext'];
+    $sidebar_links[] = ['label' => 'Logbook', 'href' => 'student/logbook.php', 'icon' => 'bi-book'];
+    $sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
+} elseif ($role === 'supervisor') {
+    $sidebar_links[] = ['label' => 'Assigned Vaults', 'href' => 'supervisor/students.php', 'icon' => 'bi-people'];
+    $sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
+} elseif ($role === 'hod') {
+    $sidebar_links[] = ['label' => 'Topics', 'href' => 'hod/topics.php', 'icon' => 'bi-clock-history'];
+    $sidebar_links[] = ['label' => 'Assign Supervisors', 'href' => 'hod/assign.php', 'icon' => 'bi-person-check'];
+    $sidebar_links[] = ['label' => 'Archive', 'href' => 'hod/archive.php', 'icon' => 'bi-archive'];
+    $sidebar_links[] = ['label' => 'Reports', 'href' => 'hod/reports.php', 'icon' => 'bi-graph-up'];
+} elseif ($role === 'admin') {
+    $sidebar_links[] = ['label' => 'Manage Users', 'href' => 'admin/users.php', 'icon' => 'bi-people'];
+    $sidebar_links[] = ['label' => 'Project Status', 'href' => 'admin/projects.php', 'icon' => 'bi-folder'];
+    $sidebar_links[] = ['label' => 'Audit Reports', 'href' => 'admin/reports.php', 'icon' => 'bi-clipboard-data'];
+}
+
 $pageTitle = 'Dashboard';
 require_once __DIR__ . '/includes/header.php';
 ?>
 
 <h1 class="mb-4">Dashboard</h1>
 <p class="text-muted">Welcome back, <?= e($user['full_name']) ?>.</p>
+
+<div class="dashboard-shell">
+    <aside class="dashboard-sidebar">
+        <div class="dashboard-sidebar__card">
+            <div class="dashboard-sidebar__role"><?= e(strtoupper($role)) ?> PORTAL</div>
+            <div class="dashboard-sidebar__name"><?= e($user['full_name']) ?></div>
+        </div>
+        <nav class="dashboard-sidebar__nav">
+            <?php foreach ($sidebar_links as $link): ?>
+                <a class="dashboard-sidebar__link<?= !empty($link['active']) ? ' is-active' : '' ?>" href="<?= base_url($link['href']) ?>">
+                    <i class="bi <?= e($link['icon']) ?>"></i>
+                    <span><?= e($link['label']) ?></span>
+                </a>
+            <?php endforeach; ?>
+        </nav>
+    </aside>
+    <div class="dashboard-content">
 
 <?php if ($role === 'student'): ?>
     <div class="row g-3 mb-4">
@@ -388,5 +428,8 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     </div>
 <?php endif; ?>
+
+    </div>
+</div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

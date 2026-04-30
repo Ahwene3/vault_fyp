@@ -103,6 +103,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
+        .login-branding img {
+            width: 100%;
+            max-width: 360px;
+            border-radius: 1.5rem;
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.4);
+        }
         .login-branding p {
             color: rgba(255, 255, 255, 0.7);
             margin: 1rem 0;
@@ -204,6 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="login-container">
         <div class="login-branding">
+            <img src="<?= base_url('assets/images/vault.svg') ?>" alt="Vault illustration">
             <h1>FYP Vault</h1>
             <p>Final Year Project Collaboration Hub</p>
         </div>

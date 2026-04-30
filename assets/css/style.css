@@ -260,6 +260,96 @@ h1, h2, h3, h4, h5 {
     box-shadow: 0 2px 4px rgba(0,0,0,0.15);
 }
 
+/* Dashboard sidebar */
+.dashboard-shell {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.dashboard-sidebar {
+    position: sticky;
+    top: 1.5rem;
+    align-self: start;
+}
+
+.dashboard-sidebar__card {
+    padding: 1.25rem;
+    border-radius: var(--vault-radius);
+    background: linear-gradient(140deg, #0f172a 0%, #1f2937 100%);
+    color: #f8fafc;
+    box-shadow: 0 1.25rem 2.5rem rgba(15, 23, 42, 0.25);
+    margin-bottom: 1rem;
+}
+
+.dashboard-sidebar__role {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(248, 250, 252, 0.6);
+}
+
+.dashboard-sidebar__name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-top: 0.35rem;
+}
+
+.dashboard-sidebar__nav {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.dashboard-sidebar__link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0.9rem;
+    border-radius: 0.75rem;
+    text-decoration: none;
+    color: #0f172a;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.dashboard-sidebar__link:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--vault-card-shadow-soft);
+    background: #ffffff;
+}
+
+.dashboard-sidebar__link.is-active {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: transparent;
+}
+
+.dashboard-sidebar__link.is-active i {
+    color: #f8fafc;
+}
+
+@media (max-width: 992px) {
+    .dashboard-shell {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-sidebar {
+        position: static;
+    }
+
+    .dashboard-sidebar__nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .dashboard-sidebar__nav {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .auth-wrapper {
