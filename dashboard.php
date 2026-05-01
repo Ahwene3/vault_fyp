@@ -145,29 +145,86 @@ if ($role === 'student') {
     $sidebar_links[] = ['label' => 'Audit Reports', 'href' => 'admin/reports.php', 'icon' => 'bi-clipboard-data'];
 }
 
+$hero_title = 'Welcome back to your workspace';
+$hero_copy = 'Track activity, jump into key actions, and keep your projects moving.';
+$hero_link = 'vault.php';
+$hero_button = 'Open Project Vault';
+
+if ($role === 'student') {
+    $hero_title = 'Build your project with confidence';
+    $hero_copy = 'Access your group, update your project, and keep your logbook current from one dashboard.';
+    $hero_link = 'student/project.php';
+    $hero_button = 'Go to My Project';
+} elseif ($role === 'supervisor') {
+    $hero_title = 'Monitor your assigned vaults';
+    $hero_copy = 'Review student progress, clear pending logbook approvals, and reply to messages faster.';
+    $hero_link = 'supervisor/students.php';
+    $hero_button = 'View Assigned Vaults';
+} elseif ($role === 'hod') {
+    $hero_title = 'Oversee your department pipeline';
+    $hero_copy = 'Approve topics, assign supervisors, and keep visibility on ongoing and completed projects.';
+    $hero_link = 'hod/topics.php';
+    $hero_button = 'Review Topics';
+} elseif ($role === 'admin') {
+    $hero_title = 'Manage the platform with clarity';
+    $hero_copy = 'Keep user accounts healthy, track project totals, and access reports from a single control center.';
+    $hero_link = 'admin/users.php';
+    $hero_button = 'Manage Users';
+}
+
 $pageTitle = 'Dashboard';
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h1 class="mb-4">Dashboard</h1>
-<p class="text-muted">Welcome back, <?= e($user['full_name']) ?>.</p>
-
 <div class="dashboard-shell">
     <aside class="dashboard-sidebar">
-        <div class="dashboard-sidebar__card">
-            <div class="dashboard-sidebar__role"><?= e(strtoupper($role)) ?> PORTAL</div>
-            <div class="dashboard-sidebar__name"><?= e($user['full_name']) ?></div>
+        <div class="dashboard-sidebar__card dashboard-sidebar__card--brand">
+            <div class="dashboard-sidebar__brand-icon"><i class="bi bi-grid-1x2-fill"></i></div>
+            <div>
+                <div class="dashboard-sidebar__role">FYP Vault</div>
+                <div class="dashboard-sidebar__name">Dashboard</div>
+            </div>
+        </div>
+        <div class="dashboard-sidebar__card dashboard-sidebar__card--profile">
+            <div class="dashboard-sidebar__avatar"><?= e(strtoupper(substr((string) $user['full_name'], 0, 1))) ?></div>
+            <div>
+                <div class="dashboard-sidebar__role"><?= e(strtoupper($role)) ?> PORTAL</div>
+                <div class="dashboard-sidebar__name"><?= e($user['full_name']) ?></div>
+            </div>
         </div>
         <nav class="dashboard-sidebar__nav">
             <?php foreach ($sidebar_links as $link): ?>
                 <a class="dashboard-sidebar__link<?= !empty($link['active']) ? ' is-active' : '' ?>" href="<?= base_url($link['href']) ?>">
-                    <i class="bi <?= e($link['icon']) ?>"></i>
+                    <span class="dashboard-sidebar__link-icon"><i class="bi <?= e($link['icon']) ?>"></i></span>
                     <span><?= e($link['label']) ?></span>
                 </a>
             <?php endforeach; ?>
+            <a class="dashboard-sidebar__link" href="<?= base_url('profile.php') ?>">
+                <span class="dashboard-sidebar__link-icon"><i class="bi bi-person-circle"></i></span>
+                <span>Profile</span>
+            </a>
+            <a class="dashboard-sidebar__link" href="<?= base_url('notifications.php') ?>">
+                <span class="dashboard-sidebar__link-icon"><i class="bi bi-bell"></i></span>
+                <span>Notifications</span>
+            </a>
         </nav>
+        <a class="dashboard-sidebar__logout" href="<?= base_url('logout.php') ?>">
+            <i class="bi bi-box-arrow-right"></i>
+            <span>Logout</span>
+        </a>
     </aside>
     <div class="dashboard-content">
+        <section class="dashboard-hero">
+            <div>
+                <div class="dashboard-hero__eyebrow"><?= e(ucfirst($role)) ?> Workspace</div>
+                <h1 class="dashboard-hero__title mb-2"><?= e($hero_title) ?></h1>
+                <p class="dashboard-hero__copy mb-0"><?= e($hero_copy) ?></p>
+            </div>
+            <div class="dashboard-hero__actions">
+                <a href="<?= base_url($hero_link) ?>" class="btn btn-warning dashboard-hero__btn"><?= e($hero_button) ?></a>
+            </div>
+        </section>
+        <section class="dashboard-main-panels">
 
 <?php if ($role === 'student'): ?>
     <div class="row g-3 mb-4">
@@ -429,6 +486,7 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 <?php endif; ?>
 
+        </section>
     </div>
 </div>
 
