@@ -119,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                     <div class="auth-form-group">
                         <label for="email">Email *</label>
-                        <input type="email" id="email" name="email" required placeholder="your.email@example.com" value="<?= e($_POST['email'] ?? '') ?>">
+                        <input type="email" id="email" name="email" required placeholder="your.email@st.rmu.edu.gh" value="<?= e($_POST['email'] ?? '') ?>">
                     </div>
                     <div class="auth-form-row">
                         <div class="auth-form-group">
