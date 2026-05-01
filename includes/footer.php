@@ -1,9 +1,19 @@
+    <?php if (!empty($renderAppSidebar)): ?>
+                </section>
+            </div>
+    <?php endif; ?>
     </main>
-    <footer class="bg-light py-3 mt-5 border-top">
+    <?php
+    $hideFooter = !empty($hideFooter);
+    $footerClass = $footerClass ?? 'bg-light py-3 mt-5 border-top';
+    ?>
+    <?php if (!$hideFooter): ?>
+    <footer class="<?= e($footerClass) ?>">
         <div class="container text-center text-muted small">
             &copy; <?= date('Y') ?> Final Year Project Vault &amp; Collaboration Hub
         </div>
     </footer>
+    <?php endif; ?>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="<?= base_url('assets/js/app.js') ?>"></script>
     <?php if (isset($extraScripts)) echo $extraScripts; ?>

@@ -110,6 +110,68 @@ function ensure_user_archive_columns(PDO $pdo): void {
 }
 
 /**
+ * Build flexible department variants so legacy text values (e.g. "IT")
+ * still match canonical department rows (e.g. "ICT Department").
+ */
+function department_name_variants(?string $value): array {
+    $raw = strtolower(trim((string) $value));
+    if ($raw === '') {
+        return [];
+    }
+
+    $variants = [$raw];
+
+    $collapsed = preg_replace('/\s+/', ' ', $raw) ?? $raw;
+    $variants[] = trim($collapsed);
+
+    $base = preg_replace('/\b(department|dept)\b/', '', $collapsed) ?? $collapsed;
+    $base = trim((string) preg_replace('/\s+/', ' ', $base));
+    if ($base !== '') {
+        $variants[] = $base;
+    }
+
+    $alpha_num = trim((string) preg_replace('/[^a-z0-9]+/', ' ', $base !== '' ? $base : $collapsed));
+    if ($alpha_num !== '') {
+        $variants[] = $alpha_num;
+        $words = array_values(array_filter(explode(' ', $alpha_num), static function ($w) {
+            return $w !== '';
+        }));
+        if (count($words) >= 2) {
+            $acronym = '';
+            foreach ($words as $w) {
+                if (in_array($w, ['and', 'of', 'the'], true)) {
+                    continue;
+                }
+                $acronym .= substr($w, 0, 1);
+            }
+            if ($acronym !== '') {
+                $variants[] = $acronym;
+            }
+        }
+    }
+
+    // Common aliases for historical/short-form department labels in this system.
+    $alias_map = [
+        'ict' => ['it', 'information technology', 'information technology department'],
+        'information technology' => ['it', 'ict', 'ict department'],
+        'information technology department' => ['it', 'ict', 'ict department'],
+        'it' => ['ict', 'information technology', 'ict department'],
+    ];
+
+    foreach ($alias_map as $needle => $aliases) {
+        if (strpos($raw, $needle) !== false || $base === $needle || $alpha_num === $needle) {
+            foreach ($aliases as $alias) {
+                $variants[] = strtolower(trim($alias));
+            }
+        }
+    }
+
+    return array_values(array_unique(array_filter(array_map('trim', $variants), static function ($v) {
+        return $v !== '';
+    })));
+}
+
+/**
  * Normalize a department reference that may be either department id or department name.
  * Returns canonical id/name when available plus variants for resilient matching.
  */
@@ -126,7 +188,7 @@ function resolve_department_info(PDO $pdo, ?string $department): array {
         ];
     }
 
-    $variants = [strtolower($raw)];
+    $variants = department_name_variants($raw);
     $id = null;
     $name = null;
 
@@ -136,7 +198,7 @@ function resolve_department_info(PDO $pdo, ?string $department): array {
         $stmt->execute([$id]);
         $name = $stmt->fetchColumn() ?: null;
         if ($name) {
-            $variants[] = strtolower((string) $name);
+            $variants = array_merge($variants, department_name_variants((string) $name));
         }
     } else {
         $stmt = $pdo->prepare('SELECT id, name FROM departments WHERE LOWER(name) = LOWER(?) AND is_active = 1 LIMIT 1');
@@ -146,7 +208,7 @@ function resolve_department_info(PDO $pdo, ?string $department): array {
             $id = (int) $row['id'];
             $name = $row['name'];
             $variants[] = strtolower((string) $id);
-            $variants[] = strtolower((string) $name);
+            $variants = array_merge($variants, department_name_variants((string) $name));
         }
     }
 
