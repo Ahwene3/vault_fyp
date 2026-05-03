@@ -2,8 +2,10 @@
 require_once __DIR__ . '/../includes/auth.php';
 require_role('student');
 
+$user = current_user();
 $uid = user_id();
 $pdo = getPDO();
+$student_department = (string) ($user['department'] ?? '');
 
 function fetch_group_project(PDO $pdo, int $group_id): ?array {
     $stmt = $pdo->prepare('SELECT p.*, u.full_name AS supervisor_name FROM projects p LEFT JOIN users u ON p.supervisor_id = u.id WHERE p.group_id = ? ORDER BY p.updated_at DESC LIMIT 1');
@@ -117,6 +119,13 @@ if ($project) {
     $assessments = $stmt->fetchAll();
 }
 
+$logbook_count = 0;
+if ($project) {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM logbook_entries WHERE project_id = ?');
+    $stmt->execute([(int) $project['id']]);
+    $logbook_count = (int) $stmt->fetchColumn();
+}
+
 // Allowed file types and max size (10MB)
 $allowed_doc = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'application/zip'];
 $allowed_ext = ['pdf', 'docx', 'doc', 'zip'];
@@ -181,64 +190,158 @@ $pageTitle = 'My Project';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<h1 class="mb-4">My Project</h1>
+<section class="dashboard-hero mb-4 d-flex align-items-center justify-content-between">
+    <div>
+        <div class="dashboard-hero__eyebrow">Student Portal</div>
+        <h1 class="dashboard-hero__title mb-2">My Project</h1>
+        <p class="dashboard-hero__copy mb-0">Track your submission, feedback, and project documents from one place.</p>
+    </div>
+    <div class="dashboard-hero__actions">
+        <a href="#project-details" class="btn dashboard-hero__btn">Update Project</a>
+    </div>
+</section>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-success me-3"><i class="bi bi-diagram-3"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Project Status</h6>
+                    <div class="student-stat-value"><?= $project ? e(ucfirst(str_replace('_', ' ', (string) $project['status']))) : 'Not Submitted' ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-primary me-3"><i class="bi bi-journal-text"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Logbook Entries</h6>
+                    <div class="student-stat-value"><?= (int) $logbook_count ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-warning me-3"><i class="bi bi-clock-history"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Last Updated</h6>
+                    <div class="student-stat-value"><?= $project ? e(date('M Y', strtotime((string) $project['updated_at']))) : '—' ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <?php if ($current_group): ?>
-    <div class="alert alert-info">
-        Working as group: <strong><?= e($current_group['name']) ?></strong> (max 5 members). All members can view updates, feedback, and assessments.
-    </div>
+    <div class="alert alert-info">Working as group: <strong><?= e($current_group['name']) ?></strong> (max 5 members). All members can view updates, feedback, and assessments.</div>
 <?php endif; ?>
 
 <?php if (!$project): ?>
     <div class="card">
         <div class="card-header">Submit Project Topic</div>
         <div class="card-body">
-            <p class="text-muted">Submit your final year project topic for HOD approval.</p>
+            <p class="text-muted">Submit your final year project topic for approval.</p>
             <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
             <form method="post">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="submit_topic">
-                <div class="mb-3">
-                    <label class="form-label" for="title">Project Title</label>
-                    <input type="text" class="form-control" id="title" name="title" required minlength="10" value="<?= e($_POST['title'] ?? '') ?>">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="title">Project Title</label>
+                        <input type="text" class="form-control" id="title" name="title" required minlength="10" value="<?= e($_POST['title'] ?? '') ?>">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="description">Project Description</label>
+                        <textarea class="form-control" id="description" name="description" rows="4"><?= e($_POST['description'] ?? '') ?></textarea>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Submit for Approval</button>
+                    </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label" for="description">Brief Description</label>
-                    <textarea class="form-control" id="description" name="description" rows="4"><?= e($_POST['description'] ?? '') ?></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">Submit for Approval</button>
             </form>
         </div>
     </div>
 <?php else: ?>
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span>Project Details</span>
-            <span class="badge bg-<?= $project['status'] === 'approved' || $project['status'] === 'in_progress' || $project['status'] === 'completed' ? 'success' : ($project['status'] === 'rejected' ? 'danger' : 'warning') ?>"><?= e($project['status']) ?></span>
+    <div class="row g-3 mb-4" id="project-details">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Project Title & Description</span>
+                    <span class="badge <?= $project['status'] === 'approved' || $project['status'] === 'in_progress' || $project['status'] === 'completed' ? 'bg-success' : ($project['status'] === 'rejected' ? 'bg-danger' : 'bg-warning text-dark') ?>"><?= e(ucfirst(str_replace('_', ' ', (string) $project['status']))) ?></span>
+                </div>
+                <div class="card-body">
+                    <h5 class="mb-3"><?= e($project['title']) ?></h5>
+                    <?php if ($project['description']): ?><p class="text-muted mb-0"><?= nl2br(e($project['description'])) ?></p><?php endif; ?>
+                    <?php if (in_array($project['status'], ['draft', 'rejected'], true)): ?>
+                        <hr>
+                        <form method="post" class="mt-3">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="submit_topic">
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label" for="title">Project Title</label>
+                                    <input type="text" class="form-control" id="title" name="title" required minlength="10" value="<?= e($project['title']) ?>">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label" for="description">Project Description</label>
+                                    <textarea class="form-control" id="description" name="description" rows="4"><?= e($project['description'] ?? '') ?></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-primary">Resubmit for Approval</button>
+                                </div>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </div>
         </div>
-        <div class="card-body">
-            <h5><?= e($project['title']) ?></h5>
-            <?php if ($project['description']): ?><p class="text-muted"><?= nl2br(e($project['description'])) ?></p><?php endif; ?>
-            <?php if ($project['supervisor_name']): ?><p class="mb-0"><strong>Supervisor:</strong> <?= e($project['supervisor_name']) ?></p><?php endif; ?>
-            <?php if ($project['rejection_reason']): ?><p class="text-danger mb-0"><strong>Rejection reason:</strong> <?= e($project['rejection_reason']) ?></p><?php endif; ?>
-            <?php if (in_array($project['status'], ['draft', 'rejected'], true)): ?>
-                <hr>
-                <form method="post" class="mt-3">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="action" value="submit_topic">
-                    <div class="mb-3">
-                        <label class="form-label" for="title">Project Title</label>
-                        <input type="text" class="form-control" id="title" name="title" required minlength="10" value="<?= e($project['title']) ?>">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="description">Brief Description</label>
-                        <textarea class="form-control" id="description" name="description" rows="4"><?= e($project['description'] ?? '') ?></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Resubmit for Approval</button>
-                </form>
-            <?php endif; ?>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header">Submission Info</div>
+                <div class="card-body">
+                    <p class="mb-2"><strong>Approval</strong><br><?= e(ucfirst(str_replace('_', ' ', (string) $project['status']))) ?></p>
+                    <p class="mb-2"><strong>Supervisor</strong><br><?= e($project['supervisor_name'] ?: 'Not assigned') ?></p>
+                    <p class="mb-2"><strong>Department</strong><br><?= e($student_department ?: '—') ?></p>
+                    <p class="mb-0 text-muted small">Submitted and managed under your student vault.</p>
+                </div>
+            </div>
         </div>
     </div>
+
+    <?php if (!empty($assessments)): ?>
+    <div class="card mb-4">
+        <div class="card-header">Supervisor Feedback</div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Feedback text</th>
+                            <th>Rating</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($assessments as $a): ?>
+                            <tr>
+                                <td><?= e(date('M j, Y', strtotime((string) $a['submitted_at']))) ?></td>
+                                <td><?= e($a['comments'] ?? '—') ?></td>
+                                <td><span class="badge bg-info text-dark"><?= $a['score'] !== null ? e($a['score'] . ' / ' . $a['max_score']) : '—' ?></span></td>
+                                <td><span class="badge bg-success">Recorded</span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <?php if (in_array($project['status'], ['approved', 'in_progress', 'completed'], true)): ?>
     <div class="card">
@@ -296,7 +399,7 @@ require_once __DIR__ . '/../includes/header.php';
             </script>
             <?php if (!empty($documents)): ?>
                 <table class="table table-sm table-hover">
-                    <thead class="table-light"><tr><th>File</th><th>Type</th><th>Chapter/Section</th><th>Uploaded</th><th>Feedback</th></tr></thead>
+                    <thead><tr><th>File</th><th>Type</th><th>Chapter/Section</th><th>Uploaded</th><th>Feedback</th></tr></thead>
                     <tbody>
                         <?php foreach ($documents as $d): ?>
                             <tr>
@@ -311,23 +414,6 @@ require_once __DIR__ . '/../includes/header.php';
                 </table>
             <?php else: ?>
                 <p class="text-muted mb-0">No documents uploaded yet.</p>
-            <?php endif; ?>
-            <?php if (!empty($assessments)): ?>
-                <hr>
-                <h6>Assessment Scores</h6>
-                <table class="table table-sm">
-                    <thead><tr><th>Type</th><th>Score</th><th>Comments</th><th>Date</th></tr></thead>
-                    <tbody>
-                        <?php foreach ($assessments as $a): ?>
-                            <tr>
-                                <td><?= e($a['assessment_type']) ?></td>
-                                <td><?= $a['score'] !== null ? e($a['score'] . ' / ' . $a['max_score']) : '—' ?></td>
-                                <td><?= e($a['comments'] ?? '—') ?></td>
-                                <td><?= e(date('M j, Y', strtotime($a['submitted_at']))) ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
             <?php endif; ?>
         </div>
     </div>

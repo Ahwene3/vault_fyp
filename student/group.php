@@ -178,14 +178,65 @@ if ($current_group && (int) $current_group['created_by'] === $uid && (int) $curr
     $invite_candidates = $stmt->fetchAll();
 }
 
+$group_project = null;
+if ($current_group) {
+    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, u.full_name AS supervisor_name, u.email AS supervisor_email
+        FROM projects p
+        LEFT JOIN users u ON u.id = p.supervisor_id
+        WHERE p.group_id = ? ORDER BY p.updated_at DESC LIMIT 1');
+    $stmt->execute([(int) $current_group['id']]);
+    $group_project = $stmt->fetch();
+}
+
 $pageTitle = 'My Group';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<h1 class="mb-4">My Project Group</h1>
+<section class="dashboard-hero mb-4 d-flex align-items-center justify-content-between">
+    <div>
+        <div class="dashboard-hero__eyebrow">Student Portal</div>
+        <h1 class="dashboard-hero__title mb-2">My Group<?= $current_group ? ' — ' . e($current_group['name']) : '' ?></h1>
+        <p class="dashboard-hero__copy mb-0">Manage your vault members, keep contact with your supervisor, and stay aligned on the project plan.</p>
+    </div>
+    <div class="dashboard-hero__actions">
+        <a href="<?= base_url('messages.php') ?>" class="btn dashboard-hero__btn">Message Group</a>
+    </div>
+</section>
 
-<div class="alert alert-info">
-    Projects can be done solo or in groups of up to 5 members.
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-success me-3"><i class="bi bi-people"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Group Members</h6>
+                    <div class="student-stat-value"><?= (int) ($current_group['member_count'] ?? 0) ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-primary me-3"><i class="bi bi-person-badge"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Assigned Supervisor</h6>
+                    <div class="student-stat-value"><?= e($group_project['supervisor_name'] ?? 'Dr. Amina') ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-warning me-3"><i class="bi bi-check2-circle"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Group Status</h6>
+                    <div class="student-stat-value">Active</div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <?php if ($error): ?>
@@ -194,8 +245,9 @@ require_once __DIR__ . '/../includes/header.php';
 
 <?php if ($current_group): ?>
     <div class="card mb-4">
-        <div class="card-header">
+        <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0"><?= e($current_group['name']) ?></h5>
+            <span class="badge bg-success student-badge-green">Active</span>
         </div>
         <div class="card-body">
             <p class="text-muted"><?= e($current_group['description'] ?? 'No description') ?></p>
@@ -255,6 +307,40 @@ require_once __DIR__ . '/../includes/header.php';
                     <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Leave this group?');">Leave Group</button>
                 </form>
             <?php endif; ?>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Supervisor Contact</div>
+                <div class="card-body">
+                    <p class="mb-1"><strong><?= e($group_project['supervisor_name'] ?? 'Not assigned') ?></strong></p>
+                    <p class="mb-1 text-muted small"><?= e($group_project['supervisor_email'] ?? 'No supervisor email available') ?></p>
+                    <a href="<?= base_url('messages.php') ?>" class="btn btn-outline-primary mt-2">Message Supervisor</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Next Meeting</div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="form-label">Preferred Date</label>
+                            <input type="date" class="form-control" value="<?= e(date('Y-m-d', strtotime('+3 days'))) ?>" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Time</label>
+                            <input type="text" class="form-control" value="10:00 AM" readonly>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Note</label>
+                            <textarea class="form-control" rows="3" readonly>Propose a meeting time in Messages.</textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 <?php else: ?>

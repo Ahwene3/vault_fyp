@@ -41,69 +41,84 @@ $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, p.submitted_at, p.group_i
 $stmt->execute([$uid]);
 $students = $stmt->fetchAll();
 
-$pageTitle = 'My Group Vaults';
+$pageTitle = 'Group Vaults';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<h1 class="mb-4">My Group Vaults</h1>
-
-<div class="card">
-    <div class="card-body">
-        <?php if (empty($students)): ?>
-            <p class="text-muted mb-0">No group vaults assigned to you yet.</p>
-        <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>Group Vault</th>
-                            <th>Members / Index No.</th>
-                            <th>Project Title</th>
-                            <th>Input</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($students as $s): ?>
-                            <tr>
-                                <td>
-                                    <?php if (!empty($s['group_id'])): ?>
-                                        <span class="badge bg-info text-dark">Group Vault: <?= e($s['group_name'] ?: ('#' . $s['group_id'])) ?></span>
-                                        <small class="text-muted d-block">Lead: <?= e($s['student_name']) ?></small>
-                                        <small class="text-muted d-block"><?= (int) ($s['group_size'] ?? 0) ?> member(s)</small>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Solo Vault</span>
-                                        <small class="text-muted d-block"><?= e($s['student_name']) ?></small>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <?php if (!empty($s['group_id'])): ?>
-                                        <small><?= e($s['group_member_directory'] ?: '—') ?></small>
-                                    <?php else: ?>
-                                        <?= e(($s['student_name'] ?? '—') . ' (' . ($s['reg_number'] ?: $s['email']) . ')') ?>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?= e($s['title']) ?></td>
-                                <td>
-                                    <small class="text-muted">
-                                        Docs: <?= (int) ($s['docs_count'] ?? 0) ?> |
-                                        Logbook: <?= (int) ($s['logbook_count'] ?? 0) ?> |
-                                        Messages: <?= (int) ($s['message_count'] ?? 0) ?>
-                                    </small>
-                                </td>
-                                <td><span class="badge bg-secondary"><?= e($s['status']) ?></span></td>
-                                <td>
-                                    <a href="<?= base_url('supervisor/student_detail.php?pid=' . $s['id']) ?>" class="btn btn-sm btn-outline-primary">View &amp; Rate</a>
-                                    <a href="<?= base_url('messages.php?pid=' . $s['id'] . '&with=' . $s['student_id']) ?>" class="btn btn-sm btn-outline-secondary">Message</a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
+<section class="dashboard-hero">
+    <div>
+        <div class="dashboard-hero__eyebrow">Supervisor Workspace</div>
+        <h1 class="dashboard-hero__title mb-2">Group Vaults</h1>
+        <p class="dashboard-hero__copy mb-0">Review assigned teams, inspect progress, and jump into feedback without leaving the workspace.</p>
     </div>
-</div>
+    <div class="dashboard-hero__actions">
+        <a href="<?= base_url('messages.php') ?>" class="btn btn-warning dashboard-hero__btn">Open Messages</a>
+    </div>
+</section>
+
+<section class="dashboard-main-panels">
+    <div class="card mb-4 supervisor-vaults-card">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <span>Assigned Group Vaults</span>
+            <a href="<?= base_url('dashboard.php') ?>" class="supervisor-view-all-link">Back to dashboard <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="card-body p-0">
+            <?php if (empty($students)): ?>
+                <p class="text-muted mb-0 px-3 py-4">No group vaults assigned to you yet.</p>
+            <?php else: ?>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle supervisor-vaults-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Group Vault</th>
+                                <th>Members / Index No.</th>
+                                <th>Project Title</th>
+                                <th>Activity</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($students as $s): ?>
+                                <tr>
+                                    <td>
+                                        <?php if (!empty($s['group_id'])): ?>
+                                            <span class="supervisor-vault-badge">Group Vault: <?= e($s['group_name'] ?: ('#' . $s['group_id'])) ?></span>
+                                            <small class="text-muted d-block">Lead: <?= e($s['student_name']) ?></small>
+                                            <small class="text-muted d-block"><?= (int) ($s['group_size'] ?? 0) ?> member(s)</small>
+                                        <?php else: ?>
+                                            <span class="supervisor-vault-badge">Solo Vault</span>
+                                            <small class="text-muted d-block"><?= e($s['student_name']) ?></small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if (!empty($s['group_id'])): ?>
+                                            <small><?= e($s['group_member_directory'] ?: '—') ?></small>
+                                        <?php else: ?>
+                                            <?= e(($s['student_name'] ?? '—') . ' (' . ($s['reg_number'] ?: $s['email']) . ')') ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="supervisor-project-title"><?= e($s['title']) ?></td>
+                                    <td>
+                                        <small class="text-muted">
+                                            Docs: <?= (int) ($s['docs_count'] ?? 0) ?> |
+                                            Logbook: <?= (int) ($s['logbook_count'] ?? 0) ?> |
+                                            Messages: <?= (int) ($s['message_count'] ?? 0) ?>
+                                        </small>
+                                    </td>
+                                    <td><span class="supervisor-status-pill"><?= e(ucfirst(str_replace('_', ' ', (string) $s['status'])) ?: 'Unknown') ?></span></td>
+                                    <td>
+                                        <a href="<?= base_url('supervisor/student_detail.php?pid=' . $s['id']) ?>" class="btn btn-sm btn-outline-primary">View &amp; Rate</a>
+                                        <a href="<?= base_url('messages.php?pid=' . $s['id'] . '&with=' . $s['student_id']) ?>" class="btn btn-sm btn-outline-secondary">Message</a>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</section>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

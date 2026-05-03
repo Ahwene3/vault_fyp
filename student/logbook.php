@@ -82,16 +82,72 @@ function get_project_supervisor(PDO $pdo, int $project_id): ?int {
 
 $entries = [];
 if ($project_id) {
-    $stmt = $pdo->prepare('SELECT le.id, le.entry_date, le.title, le.content, le.supervisor_approved, le.supervisor_comment, le.approved_at, le.created_at, le.created_by, u.full_name AS author_name FROM logbook_entries le LEFT JOIN users u ON le.created_by = u.id WHERE le.project_id = ? ORDER BY le.entry_date DESC, le.created_at DESC');
+    $stmt = $pdo->prepare('SELECT le.id, le.entry_date, le.title, le.content, le.supervisor_approved, le.supervisor_comment, le.approved_at, le.created_at, le.created_by, sup.full_name AS supervisor_name FROM logbook_entries le LEFT JOIN projects p ON p.id = le.project_id LEFT JOIN users sup ON sup.id = p.supervisor_id WHERE le.project_id = ? ORDER BY le.entry_date DESC, le.created_at DESC');
     $stmt->execute([$project_id]);
     $entries = $stmt->fetchAll();
+}
+
+$total_entries = count($entries);
+$approved_entries = 0;
+$pending_entries = 0;
+foreach ($entries as $entry) {
+    if ($entry['supervisor_approved'] === null) {
+        $pending_entries++;
+    } elseif ($entry['supervisor_approved']) {
+        $approved_entries++;
+    }
 }
 
 $pageTitle = 'Logbook';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<h1 class="mb-4">Logbook</h1>
+<section class="dashboard-hero mb-4 d-flex align-items-center justify-content-between">
+    <div>
+        <div class="dashboard-hero__eyebrow">Student Portal</div>
+        <h1 class="dashboard-hero__title mb-2">My Logbook</h1>
+        <p class="dashboard-hero__copy mb-0">Record progress, notes, and supervisor feedback in one place.</p>
+    </div>
+    <div class="dashboard-hero__actions">
+        <a href="#new-entry" class="btn dashboard-hero__btn">New Entry</a>
+    </div>
+</section>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-success me-3"><i class="bi bi-journal-text"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Total Entries</h6>
+                    <div class="student-stat-value"><?= (int) $total_entries ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-primary me-3"><i class="bi bi-check2-circle"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Approved</h6>
+                    <div class="student-stat-value"><?= (int) $approved_entries ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-warning me-3"><i class="bi bi-hourglass-split"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Pending Review</h6>
+                    <div class="student-stat-value"><?= (int) $pending_entries ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <?php if ($group_id > 0): ?>
     <div class="alert alert-info">This logbook is shared with your group members. Everyone in your group can add entries and view supervisor feedback.</div>
@@ -100,8 +156,8 @@ require_once __DIR__ . '/../includes/header.php';
 <?php if (!$project_id): ?>
     <div class="alert alert-info">You need an approved project to maintain a logbook. Submit and get your topic approved first.</div>
 <?php else: ?>
-    <div class="card mb-4">
-        <div class="card-header">Add Entry</div>
+    <div class="card mb-4" id="new-entry">
+        <div class="card-header">Add New Entry</div>
         <div class="card-body">
             <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
             <form method="post">
@@ -109,19 +165,19 @@ require_once __DIR__ . '/../includes/header.php';
                 <input type="hidden" name="action" value="add_entry">
                 <div class="row g-3">
                     <div class="col-md-3">
+                        <label class="form-label">Entry Title</label>
+                        <input type="text" name="title" class="form-control" required maxlength="255">
+                    </div>
+                    <div class="col-md-3">
                         <label class="form-label">Date</label>
                         <input type="date" name="entry_date" class="form-control" value="<?= e(date('Y-m-d')) ?>" required>
                     </div>
-                    <div class="col-md-9">
-                        <label class="form-label">Title</label>
-                        <input type="text" name="title" class="form-control" required maxlength="255">
-                    </div>
                     <div class="col-12">
-                        <label class="form-label">Content</label>
+                        <label class="form-label">Activity Summary</label>
                         <textarea name="content" class="form-control" rows="4" required></textarea>
                     </div>
                     <div class="col-12">
-                        <button type="submit" class="btn btn-primary">Add Entry</button>
+                        <button type="submit" class="btn btn-primary">Submit Entry</button>
                     </div>
                 </div>
             </form>
@@ -129,29 +185,41 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
     <div class="card">
-        <div class="card-header">Entries</div>
-        <div class="card-body">
+        <div class="card-header">All Logbook Entries</div>
+        <div class="card-body p-0">
             <?php if (empty($entries)): ?>
-                <p class="text-muted mb-0">No logbook entries yet.</p>
+                <p class="text-muted px-3 py-4 mb-0">No logbook entries yet.</p>
             <?php else: ?>
-                <div class="list-group list-group-flush">
-                    <?php foreach ($entries as $e): ?>
-                        <div class="list-group-item logbook-entry <?= $e['supervisor_approved'] === null ? 'pending' : ($e['supervisor_approved'] ? 'approved' : 'flagged') ?>">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <strong><?= e($e['title']) ?></strong>
-                                    <span class="text-muted ms-2"><?= e($e['entry_date']) ?></span>
-                                </div>
-                                <span class="badge bg-<?= $e['supervisor_approved'] === null ? 'warning' : ($e['supervisor_approved'] ? 'success' : 'danger') ?>">
-                                    <?= $e['supervisor_approved'] === null ? 'Pending' : ($e['supervisor_approved'] ? 'Approved' : 'Flagged') ?>
-                                </span>
-                            </div>
-                            <p class="mb-1 mt-1"><?= nl2br(e($e['content'])) ?></p>
-                            <?php if (!empty($e['author_name'])): ?><p class="small text-muted mb-0"><strong>Added by:</strong> <?= e($e['author_name']) ?></p><?php endif; ?>
-                            <?php if ($e['supervisor_comment']): ?><p class="small text-muted mb-0"><strong>Supervisor:</strong> <?= e($e['supervisor_comment']) ?></p><?php endif; ?>
-                            <?php if ($e['approved_at']): ?><p class="small text-muted mb-0">Signed off: <?= e(date('M j, Y', strtotime($e['approved_at']))) ?></p><?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Entry Title</th>
+                                <th>Activity Summary</th>
+                                <th>Supervisor</th>
+                                <th>Status</th>
+                                <th>Date</th>
+                                <th>View</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($entries as $i => $e): ?>
+                                <tr>
+                                    <td><?= $i + 1 ?></td>
+                                    <td class="fw-semibold"><?= e($e['title']) ?></td>
+                                    <td><?= e(mb_substr((string) $e['content'], 0, 110)) ?></td>
+                                    <td><?= e($e['supervisor_name'] ?: '—') ?></td>
+                                    <td>
+                                        <?php $status = $e['supervisor_approved'] === null ? 'Pending' : ($e['supervisor_approved'] ? 'Approved' : 'Flagged'); ?>
+                                        <span class="badge <?= $e['supervisor_approved'] === null ? 'bg-warning text-dark' : ($e['supervisor_approved'] ? 'bg-success' : 'bg-danger') ?>"><?= e($status) ?></span>
+                                    </td>
+                                    <td><?= e(date('M j, Y', strtotime((string) $e['entry_date']))) ?></td>
+                                    <td><button type="button" class="btn btn-sm btn-outline-primary" disabled>View</button></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             <?php endif; ?>
         </div>

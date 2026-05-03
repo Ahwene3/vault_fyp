@@ -6,26 +6,38 @@ $user = current_user();
 $uid = (int) $user['id'];
 $pdo = getPDO();
 
+function split_profile_name(string $name): array {
+    $parts = preg_split('/\s+/', trim($name)) ?: [];
+    $first = $parts[0] ?? '';
+    $last = count($parts) > 1 ? implode(' ', array_slice($parts, 1)) : '';
+    return [$first, $last];
+}
+
 $updated = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
-    $full_name = trim($_POST['full_name'] ?? '');
+    $first_name = trim($_POST['first_name'] ?? '');
+    $last_name = trim($_POST['last_name'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
-    if ($full_name) {
+    $full_name = trim($first_name . ' ' . $last_name);
+
+    if ($full_name !== '') {
         $stmt = $pdo->prepare('UPDATE users SET full_name = ?, phone = ? WHERE id = ?');
         $stmt->execute([$full_name, $phone ?: null, $uid]);
         $_SESSION['user']['full_name'] = $full_name;
         $_SESSION['user']['phone'] = $phone;
         $updated = true;
     }
+
     if (!empty($_POST['new_password'])) {
-        $new = $_POST['new_password'];
-        $confirm = $_POST['new_password_confirm'] ?? '';
+        $new = (string) $_POST['new_password'];
+        $confirm = (string) ($_POST['new_password_confirm'] ?? '');
         if (strlen($new) >= 8 && $new === $confirm) {
             $hash = password_hash($new, PASSWORD_DEFAULT);
             $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?')->execute([$hash, $uid]);
             $updated = true;
         }
     }
+
     if ($updated) {
         flash('success', 'Profile updated.');
         redirect(base_url('profile.php'));
@@ -35,54 +47,103 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
 $stmt = $pdo->prepare('SELECT email, full_name, role, department, reg_number, phone, created_at FROM users WHERE id = ?');
 $stmt->execute([$uid]);
 $profile = $stmt->fetch();
+[$first_name, $last_name] = split_profile_name((string) ($profile['full_name'] ?? ''));
 
 $pageTitle = 'Profile';
 require_once __DIR__ . '/includes/header.php';
 ?>
-<h1 class="mb-4">My Profile</h1>
-<div class="row">
+
+<section class="dashboard-hero mb-4 d-flex align-items-center justify-content-between">
+    <div>
+        <div class="dashboard-hero__eyebrow">Student Portal</div>
+        <h1 class="dashboard-hero__title mb-2">My Profile</h1>
+        <p class="dashboard-hero__copy mb-0">Update your student details and keep your vault identity current.</p>
+    </div>
+    <div class="dashboard-hero__actions">
+        <a href="#profile-form" class="btn dashboard-hero__btn">Save Changes</a>
+    </div>
+</section>
+
+<div class="card mb-4 student-profile-card">
+    <div class="card-body d-flex flex-wrap align-items-center gap-3">
+        <div class="student-avatar-xl"><?= e(strtoupper(substr((string) ($profile['full_name'] ?? 'U'), 0, 1))) ?></div>
+        <div class="flex-grow-1">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <h2 class="h4 mb-0"><?= e($profile['full_name']) ?></h2>
+                <span class="badge bg-success student-badge-green">Active Student</span>
+            </div>
+            <div class="text-muted"><?= e(($profile['reg_number'] ?: '—')) ?> · Student ID #<?= (int) $uid ?> · <?= e($profile['department'] ?: 'No department') ?></div>
+            <div class="text-muted small"><?= e($profile['email']) ?></div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
     <div class="col-lg-8">
-        <div class="card mb-4">
+        <div class="card">
             <div class="card-header">Edit Profile</div>
             <div class="card-body">
-                <form method="post">
+                <form method="post" id="profile-form">
                     <?= csrf_field() ?>
-                    <div class="mb-3">
-                        <label class="form-label">Email</label>
-                        <input type="text" class="form-control" value="<?= e($profile['email']) ?>" disabled>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="first_name">First Name</label>
+                            <input type="text" class="form-control" id="first_name" name="first_name" value="<?= e($first_name) ?>" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="last_name">Last Name</label>
+                            <input type="text" class="form-control" id="last_name" name="last_name" value="<?= e($last_name) ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="student_id">Student ID</label>
+                            <input type="text" class="form-control" id="student_id" value="<?= (int) $uid ?>" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="index_number">Index Number</label>
+                            <input type="text" class="form-control" id="index_number" value="<?= e($profile['reg_number'] ?? '—') ?>" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="email">Email</label>
+                            <input type="email" class="form-control" id="email" value="<?= e($profile['email']) ?>" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="department">Department</label>
+                            <input type="text" class="form-control" id="department" value="<?= e($profile['department'] ?? '—') ?>" readonly>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label" for="phone">Phone</label>
+                            <input type="text" class="form-control" id="phone" name="phone" value="<?= e($profile['phone'] ?? '') ?>">
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="full_name">Full Name</label>
-                        <input type="text" class="form-control" id="full_name" name="full_name" value="<?= e($profile['full_name']) ?>" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="phone">Phone</label>
-                        <input type="text" class="form-control" id="phone" name="phone" value="<?= e($profile['phone'] ?? '') ?>">
-                    </div>
-                    <hr>
+                    <hr class="my-4">
                     <h6>Change Password</h6>
-                    <div class="mb-3">
-                        <label class="form-label" for="new_password">New Password</label>
-                        <input type="password" class="form-control" id="new_password" name="new_password" minlength="8">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="new_password">New Password</label>
+                            <input type="password" class="form-control" id="new_password" name="new_password" minlength="8">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="new_password_confirm">Confirm New Password</label>
+                            <input type="password" class="form-control" id="new_password_confirm" name="new_password_confirm">
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="new_password_confirm">Confirm New Password</label>
-                        <input type="password" class="form-control" id="new_password_confirm" name="new_password_confirm">
+                    <div class="d-flex justify-content-end mt-4">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
                     </div>
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
                 </form>
             </div>
         </div>
     </div>
     <div class="col-lg-4">
-        <div class="card">
+        <div class="card h-100">
+            <div class="card-header">Account Summary</div>
             <div class="card-body">
-                <p class="mb-1"><strong>Role</strong> <?= e(ucfirst($profile['role'])) ?></p>
-                <?php if ($profile['department']): ?><p class="mb-1"><strong>Department</strong> <?= e($profile['department']) ?></p><?php endif; ?>
-                <?php if ($profile['reg_number']): ?><p class="mb-1"><strong>Reg. No.</strong> <?= e($profile['reg_number']) ?></p><?php endif; ?>
-                <p class="mb-0 text-muted small">Member since <?= e(date('M j, Y', strtotime($profile['created_at']))) ?></p>
+                <p class="mb-2"><strong>Role</strong><br><?= e(ucfirst((string) $profile['role'])) ?></p>
+                <p class="mb-2"><strong>Member since</strong><br><?= e(date('M j, Y', strtotime((string) $profile['created_at']))) ?></p>
+                <p class="mb-0 text-muted small">Use this profile to keep your vault identity and department details current.</p>
             </div>
         </div>
     </div>
 </div>
+
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

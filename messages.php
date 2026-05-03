@@ -148,6 +148,12 @@ if ($role === 'student') {
     $conversations = [];
 }
 
+$unread_message_count = 0;
+$stmt = $pdo->prepare('SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_read = 0');
+$stmt->execute([$uid]);
+$unread_message_count = (int) $stmt->fetchColumn();
+$active_contacts = count($conversations);
+
 if ($project_id && !can_access_project_messages($pdo, $uid, $role, $project_id)) {
     $project_id = null;
 }
@@ -280,11 +286,45 @@ $pageTitle = 'Messages';
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-<h1 class="mb-4">Messages</h1>
+<section class="dashboard-hero mb-4 d-flex align-items-center justify-content-between">
+    <div>
+        <div class="dashboard-hero__eyebrow">Student Portal</div>
+        <h1 class="dashboard-hero__title mb-2">Messages</h1>
+        <p class="dashboard-hero__copy mb-0">Keep your supervisor and group members in sync from one inbox.</p>
+    </div>
+    <div class="dashboard-hero__actions">
+        <a href="#new-message" class="btn dashboard-hero__btn">New Message</a>
+    </div>
+</section>
 
-<div class="row">
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-danger me-3"><i class="bi bi-envelope-fill"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Unread Messages</h6>
+                    <div class="student-stat-value"><?= (int) $unread_message_count ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card stat-card student-stat-card h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="student-stat-icon text-success me-3"><i class="bi bi-person-lines-fill"></i></div>
+                <div>
+                    <h6 class="text-muted mb-1">Active Contacts</h6>
+                    <div class="student-stat-value"><?= (int) $active_contacts ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
     <div class="col-md-4">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header">Conversations</div>
             <div class="list-group list-group-flush">
                 <?php if (empty($conversations)): ?>
@@ -297,10 +337,24 @@ require_once __DIR__ . '/includes/header.php';
                             if ($role === 'supervisor' && !empty($c['group_name']) && !empty($c['member_names'])) {
                                 $subtitle = 'Group members: ' . $c['member_names'];
                             }
+                            $thread_unread = 0;
+                            $stmt = $pdo->prepare('SELECT COUNT(*) FROM messages WHERE project_id = ? AND recipient_id = ? AND is_read = 0');
+                            $stmt->execute([(int) $c['id'], $uid]);
+                            $thread_unread = (int) $stmt->fetchColumn();
                         ?>
-                        <a href="<?= base_url('messages.php?pid=' . $c['id'] . '&with=' . $target_id) ?>" class="list-group-item list-group-item-action <?= $project_id == $c['id'] ? 'active' : '' ?>">
-                            <strong><?= e($c['title']) ?></strong><br>
-                            <small><?= e($subtitle) ?></small>
+                        <a href="<?= base_url('messages.php?pid=' . $c['id'] . '&with=' . $target_id) ?>" class="list-group-item list-group-item-action <?= $project_id == $c['id'] ? 'active' : '' ?> student-inbox-row <?= $project_id == $c['id'] ? 'is-unread' : '' ?>">
+                            <span class="student-inbox-row__avatar"><?= e(strtoupper(substr((string) ($c['other_name'] ?? $c['title']), 0, 1))) ?></span>
+                            <div class="flex-grow-1">
+                                <div class="d-flex align-items-start justify-content-between gap-2">
+                                    <div>
+                                        <strong><?= e($c['title']) ?></strong>
+                                        <?php if ($thread_unread > 0): ?><span class="badge bg-danger ms-2"><?= (int) $thread_unread ?></span><?php endif; ?>
+                                        <br>
+                                        <small><?= e($subtitle) ?></small>
+                                    </div>
+                                    <small class="text-muted text-nowrap"><?= e(date('M j', strtotime((string) $c['updated_at']))) ?></small>
+                                </div>
+                            </div>
                         </a>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -309,29 +363,29 @@ require_once __DIR__ . '/includes/header.php';
     </div>
     <div class="col-md-8">
         <?php if ($project_context): ?>
-            <div class="card">
+            <div class="card h-100">
                 <div class="card-header">
                     <div class="fw-semibold"><?= e($chat_header) ?></div>
                     <?php if ($chat_subheader): ?><small class="text-muted"><?= e($chat_subheader) ?></small><?php endif; ?>
                 </div>
-                <div class="card-body overflow-auto" style="max-height: 400px;">
+                <div class="card-body overflow-auto" style="max-height: 420px;">
                     <?php if (empty($messages)): ?>
                         <p class="text-muted mb-0">No messages yet. Start the conversation below.</p>
                     <?php else: ?>
                         <?php foreach ($messages as $m): ?>
                             <div class="mb-3 <?= $m['sender_id'] == $uid ? 'text-end' : '' ?>">
-                                <div class="d-inline-block text-start p-2 rounded <?= $m['sender_id'] == $uid ? 'bg-primary text-white' : 'bg-light' ?>" style="max-width: 85%;">
+                                <div class="d-inline-block text-start p-3 rounded <?= $m['sender_id'] == $uid ? 'bg-success text-white' : 'bg-dark text-light' ?>" style="max-width: 85%;">
                                     <?php if ((int) $m['sender_id'] !== (int) $uid): ?>
                                         <div class="small fw-semibold mb-1"><?= e($m['sender_name']) ?></div>
                                     <?php endif; ?>
-                                    <?= nl2br(e($m['body'])) ?>
+                                    <div><?= nl2br(e($m['body'])) ?></div>
                                     <br><small class="opacity-75"><?= e(date('M j, H:i', strtotime($m['created_at']))) ?></small>
                                 </div>
                             </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
-                <div class="card-footer">
+                <div class="card-footer" id="new-message">
                     <form method="post">
                         <?= csrf_field() ?>
                         <div class="input-group">
