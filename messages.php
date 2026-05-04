@@ -297,10 +297,26 @@ require_once __DIR__ . '/includes/header.php';
                             if ($role === 'supervisor' && !empty($c['group_name']) && !empty($c['member_names'])) {
                                 $subtitle = 'Group members: ' . $c['member_names'];
                             }
+                            $thread_unread = 0;
+                            $stmt = $pdo->prepare('SELECT COUNT(*) FROM messages WHERE project_id = ? AND recipient_id = ? AND is_read = 0');
+                            $stmt->execute([(int) $c['id'], $uid]);
+                            $thread_unread = (int) $stmt->fetchColumn();
+                            $thread_is_active = ((int) $project_id === (int) $c['id']);
+                            $row_classes = 'list-group-item list-group-item-action student-inbox-row ' . ($thread_unread > 0 ? 'is-unread' : 'is-read') . ($thread_is_active ? ' is-active' : '');
                         ?>
-                        <a href="<?= base_url('messages.php?pid=' . $c['id'] . '&with=' . $target_id) ?>" class="list-group-item list-group-item-action <?= $project_id == $c['id'] ? 'active' : '' ?>">
-                            <strong><?= e($c['title']) ?></strong><br>
-                            <small><?= e($subtitle) ?></small>
+                        <a href="<?= base_url('messages.php?pid=' . $c['id'] . '&with=' . $target_id) ?>" class="<?= e($row_classes) ?>">
+                            <div class="d-flex align-items-start justify-content-between gap-2">
+                                <div class="flex-grow-1">
+                                    <strong><?= e($c['title']) ?></strong>
+                                    <?php if ($thread_unread > 0): ?><span class="badge bg-danger ms-2"><?= (int) $thread_unread ?></span><?php endif; ?>
+                                    <br>
+                                    <small><?= e($subtitle) ?></small>
+                                </div>
+                                <div class="text-end flex-shrink-0">
+                                    <small class="text-muted text-nowrap d-block"><?= e(date('M j', strtotime((string) $c['updated_at']))) ?></small>
+                                    <span class="student-notification-dot <?= $thread_unread > 0 ? 'is-unread' : 'is-read' ?>" aria-hidden="true"></span>
+                                </div>
+                            </div>
                         </a>
                     <?php endforeach; ?>
                 <?php endif; ?>

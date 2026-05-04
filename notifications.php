@@ -5,6 +5,24 @@ require_login();
 $uid = user_id();
 $pdo = getPDO();
 
+if (isset($_GET['open'])) {
+    $open_id = (int) $_GET['open'];
+    if ($open_id > 0) {
+        $stmt = $pdo->prepare('SELECT link FROM notifications WHERE id = ? AND user_id = ? LIMIT 1');
+        $stmt->execute([$open_id, $uid]);
+        $notification_link = $stmt->fetchColumn();
+
+        if ($notification_link !== false) {
+            $pdo->prepare('UPDATE notifications SET is_read = 1, read_at = NOW() WHERE id = ? AND user_id = ?')->execute([$open_id, $uid]);
+            if (!empty($notification_link)) {
+                redirect($notification_link);
+            }
+            flash('success', 'Notification marked as read.');
+            redirect(base_url('notifications.php'));
+        }
+    }
+}
+
 if (isset($_POST['mark_read']) && csrf_verify()) {
     $pdo->prepare('UPDATE notifications SET is_read = 1, read_at = NOW() WHERE user_id = ?')->execute([$uid]);
     flash('success', 'All notifications marked as read.');
@@ -33,7 +51,7 @@ require_once __DIR__ . '/includes/header.php';
             <div class="list-group-item text-muted">No notifications.</div>
         <?php else: ?>
             <?php foreach ($notifications as $n): ?>
-                <a href="<?= $n['link'] ? htmlspecialchars($n['link']) : '#' ?>" class="list-group-item list-group-item-action <?= !$n['is_read'] ? 'message-item unread' : '' ?>">
+                <a href="<?= base_url('notifications.php?open=' . (int) $n['id']) ?>" class="list-group-item list-group-item-action notification-item <?= !$n['is_read'] ? 'is-unread' : 'is-read' ?>">
                     <div class="d-flex w-100 justify-content-between">
                         <h6 class="mb-1"><?= e($n['title']) ?></h6>
                         <small><?= e(date('M j, H:i', strtotime($n['created_at']))) ?></small>
