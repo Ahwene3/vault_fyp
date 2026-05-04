@@ -17,6 +17,8 @@ if (!$project) {
     redirect(base_url('supervisor/students.php'));
 }
 
+$is_archived = ($project['status'] ?? '') === 'archived';
+
 function assessment_recipient_ids(PDO $pdo, array $project): array {
     $ids = [(int) $project['student_id']];
     if (!empty($project['group_id'])) {
@@ -33,6 +35,10 @@ $error = '';
 
 // Submit assessment form
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
+    if ($is_archived) {
+        flash('error', 'This project is archived. Assessments cannot be submitted.');
+        redirect(base_url('supervisor/assessment.php?pid=' . $pid));
+    }
     $assessment_type = trim($_POST['assessment_type'] ?? 'proposal_review');
     $research = isset($_POST['research_quality']) ? (float) $_POST['research_quality'] : null;
     $method = isset($_POST['methodology']) ? (float) $_POST['methodology'] : null;
@@ -95,6 +101,14 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="alert alert-danger"><?= e($error) ?></div>
 <?php endif; ?>
 
+<?php if ($is_archived): ?>
+    <div class="alert alert-secondary d-flex align-items-center gap-2">
+        <i class="bi bi-archive-fill fs-5"></i>
+        <div>This project is <strong>archived</strong>. Assessment history is available below, but new assessments cannot be submitted.</div>
+    </div>
+<?php endif; ?>
+
+<?php if (!$is_archived): ?>
 <div class="card mb-4">
     <div class="card-header">
         <h5 class="mb-0">Formal Assessment Sheet</h5>
@@ -174,6 +188,7 @@ require_once __DIR__ . '/../includes/header.php';
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <?php if (!empty($assessment_history)): ?>
     <div class="card">

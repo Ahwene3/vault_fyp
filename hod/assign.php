@@ -64,6 +64,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
         redirect(base_url('hod/assign.php'));
     }
 
+    if (($_POST['action'] ?? '') === 'auto_assign') {
+        if (empty($supervisors) || empty($unassigned)) {
+            flash('error', empty($supervisors) ? 'No active supervisors in your department.' : 'No unassigned projects to process.');
+            redirect(base_url('hod/assign.php'));
+        }
+
+        // Build current assignment counts to balance the round-robin
+        $sup_ids = array_column($supervisors, 'id');
+        $count_stmt = $pdo->prepare('SELECT supervisor_id, COUNT(*) AS cnt FROM projects WHERE supervisor_id IN (' . sql_placeholders(count($sup_ids)) . ') AND status NOT IN ("archived") GROUP BY supervisor_id');
+        $count_stmt->execute($sup_ids);
+        $load = [];
+        foreach ($count_stmt->fetchAll() as $row) {
+            $load[(int) $row['supervisor_id']] = (int) $row['cnt'];
+        }
+
+        // Sort supervisors by workload ascending for initial order
+        $sorted_sups = $supervisors;
+        usort($sorted_sups, static function (array $a, array $b) use ($load): int {
+            return ($load[$a['id']] ?? 0) <=> ($load[$b['id']] ?? 0);
+        });
+
+        $sup_count = count($sorted_sups);
+        $assigned_count = 0;
+        foreach ($unassigned as $i => $p) {
+            $chosen = $sorted_sups[$i % $sup_count];
+            $dept_ph = sql_placeholders(count($hod_department_variants));
+            $chk = $pdo->prepare('SELECT id FROM projects WHERE id = ? AND status = "approved" AND supervisor_id IS NULL LIMIT 1');
+            $chk->execute([$p['id']]);
+            if (!$chk->fetchColumn()) {
+                continue;
+            }
+            $upd = $pdo->prepare('UPDATE projects SET supervisor_id = ?, status = "in_progress" WHERE id = ? AND status = "approved" AND supervisor_id IS NULL');
+            $upd->execute([$chosen['id'], $p['id']]);
+            if ($upd->rowCount()) {
+                $assigned_count++;
+                foreach (assign_member_ids($pdo, (int) $p['id']) as $member_id) {
+                    $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([
+                        $member_id, 'supervisor_assigned', 'Supervisor assigned',
+                        'A supervisor has been assigned to your project: ' . $chosen['full_name'],
+                        base_url('student/project.php')
+                    ]);
+                }
+            }
+        }
+        flash('success', "Round-robin auto-assignment complete. {$assigned_count} project(s) assigned.");
+        redirect(base_url('hod/assign.php'));
+    }
+
     $project_id = (int) ($_POST['project_id'] ?? 0);
     $supervisor_id = (int) ($_POST['supervisor_id'] ?? 0);
     if ($project_id && $supervisor_id) {
@@ -120,7 +168,18 @@ require_once __DIR__ . '/../includes/header.php';
 <?php endif; ?>
 
 <div class="card">
-    <div class="card-header">Projects Without Supervisor</div>
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span>Projects Without Supervisor</span>
+        <?php if (!empty($unassigned) && !empty($supervisors)): ?>
+            <form method="post" class="m-0">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="auto_assign">
+                <button type="submit" class="btn btn-sm btn-primary" onclick="return confirm('Auto-assign all <?= count($unassigned) ?> unassigned project(s) to <?= count($supervisors) ?> supervisor(s) using round-robin?')">
+                    <i class="bi bi-shuffle"></i> Auto-Assign All (Round-Robin)
+                </button>
+            </form>
+        <?php endif; ?>
+    </div>
     <div class="card-body">
         <?php if (empty($unassigned)): ?>
             <p class="text-muted mb-0">All approved projects have a supervisor assigned.</p>

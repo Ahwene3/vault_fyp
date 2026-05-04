@@ -93,11 +93,16 @@ if (!$project && !$group_id) {
     $project = $stmt->fetch();
 }
 
+$is_archived = !empty($project) && ($project['status'] ?? '') === 'archived';
 $error = '';
 $success = '';
 
 // Submit new topic or update draft
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
+    if ($is_archived) {
+        flash('error', 'This project is archived and cannot be modified.');
+        redirect(base_url('student/project.php'));
+    }
     $action = $_POST['action'] ?? '';
     $title = trim($_POST['title'] ?? '');
     $description = trim($_POST['description'] ?? '');
@@ -169,7 +174,7 @@ $allowed_doc = ['application/pdf', 'application/vnd.openxmlformats-officedocumen
 $allowed_ext = ['pdf', 'docx', 'doc', 'zip'];
 $max_size = 10 * 1024 * 1024;
 $upload_dir = dirname(__DIR__) . '/uploads/projects/' . ($project['id'] ?? 0);
-if ($project && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && isset($_POST['action']) && $_POST['action'] === 'upload_doc') {
+if ($project && !$is_archived && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && isset($_POST['action']) && $_POST['action'] === 'upload_doc') {
     if (!in_array($project['status'], ['approved', 'in_progress', 'completed'], true)) {
         $error = 'You can upload documents only after your topic is approved.';
     } elseif (!empty($_FILES['doc_file']['name'])) {
@@ -308,6 +313,13 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
+<?php if ($is_archived): ?>
+    <div class="alert alert-secondary d-flex align-items-center gap-2">
+        <i class="bi bi-archive-fill fs-5"></i>
+        <div>This project has been <strong>archived</strong>. You can view your complete project history below, but no changes are permitted.</div>
+    </div>
+<?php endif; ?>
+
 <?php if ($current_group): ?>
     <div class="alert alert-info">Working as group: <strong><?= e($current_group['name']) ?></strong> (max 5 members). All members can view updates, feedback, and assessments.</div>
 <?php endif; ?>
@@ -414,11 +426,12 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
     <?php endif; ?>
 
-    <?php if (in_array($project['status'], ['approved', 'in_progress', 'completed'], true)): ?>
+    <?php if (in_array($project['status'], ['approved', 'in_progress', 'completed', 'archived', 'pending_completion'], true)): ?>
     <div class="card">
-        <div class="card-header">Project Documents & Documentation</div>
+        <div class="card-header">Project Documents &amp; Documentation</div>
         <div class="card-body">
             <?php if ($error): ?><div class="alert alert-danger alert-dismissible fade show" role="alert"><strong>Upload Error:</strong> <?= e($error) ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div><?php endif; ?>
+            <?php if (!$is_archived): ?>
             <form method="post" enctype="multipart/form-data" class="mb-4">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="upload_doc">
@@ -468,6 +481,7 @@ require_once __DIR__ . '/../includes/header.php';
                     }
                 });
             </script>
+            <?php endif; ?>
             <?php if (!empty($documents)): ?>
                 <table class="table table-sm table-hover">
                     <thead><tr><th>File</th><th>Type</th><th>Chapter/Section</th><th>Uploaded</th><th>Feedback</th></tr></thead>

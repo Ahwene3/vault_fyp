@@ -6,7 +6,7 @@ $uid = user_id();
 $pdo = getPDO();
 
 function resolve_group_project_id_for_logbook(PDO $pdo, int $group_id): ?int {
-    $stmt = $pdo->prepare('SELECT id FROM projects WHERE group_id = ? AND status IN ("approved", "in_progress", "completed") ORDER BY updated_at DESC LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id FROM projects WHERE group_id = ? AND status IN ("approved", "in_progress", "completed", "pending_completion", "archived") ORDER BY updated_at DESC LIMIT 1');
     $stmt->execute([$group_id]);
     $project_id = (int) ($stmt->fetchColumn() ?: 0);
     if ($project_id > 0) {
@@ -21,7 +21,7 @@ function resolve_group_project_id_for_logbook(PDO $pdo, int $group_id): ?int {
         return null;
     }
 
-    $stmt = $pdo->prepare('SELECT id FROM projects WHERE student_id = ? AND status IN ("approved", "in_progress", "completed") AND (group_id IS NULL OR group_id = ?) ORDER BY updated_at DESC LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id FROM projects WHERE student_id = ? AND status IN ("approved", "in_progress", "completed", "pending_completion", "archived") AND (group_id IS NULL OR group_id = ?) ORDER BY updated_at DESC LIMIT 1');
     $stmt->execute([$creator_id, $group_id]);
     $creator_project_id = (int) ($stmt->fetchColumn() ?: 0);
     if ($creator_project_id <= 0) {
@@ -45,14 +45,26 @@ if ($group_id > 0) {
     }
 }
 if (!$project && $group_id === 0) {
-    $stmt = $pdo->prepare('SELECT id FROM projects WHERE student_id = ? AND status IN ("approved", "in_progress", "completed") ORDER BY updated_at DESC LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id FROM projects WHERE student_id = ? AND status IN ("approved", "in_progress", "completed", "pending_completion", "archived") ORDER BY updated_at DESC LIMIT 1');
     $stmt->execute([$uid]);
     $project = $stmt->fetch();
 }
 $project_id = $project ? (int) $project['id'] : null;
 
+// Check if project is archived (read-only)
+$is_archived = false;
+if ($project_id) {
+    $status_stmt = $pdo->prepare('SELECT status FROM projects WHERE id = ? LIMIT 1');
+    $status_stmt->execute([$project_id]);
+    $is_archived = ($status_stmt->fetchColumn() ?: '') === 'archived';
+}
+
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
+    if ($is_archived) {
+        flash('error', 'This logbook is archived and cannot be modified.');
+        redirect(base_url('student/logbook.php'));
+    }
     $action = $_POST['action'] ?? '';
     if ($action === 'add_entry' && $project_id) {
         $entry_date = $_POST['entry_date'] ?? '';
@@ -149,13 +161,19 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<?php if ($group_id > 0): ?>
+<?php if ($is_archived): ?>
+    <div class="alert alert-secondary d-flex align-items-center gap-2">
+        <i class="bi bi-archive-fill fs-5"></i>
+        <div>This logbook is <strong>archived</strong>. You can review all past entries, but adding new entries is no longer permitted.</div>
+    </div>
+<?php elseif ($group_id > 0): ?>
     <div class="alert alert-info">This logbook is shared with your group members. Everyone in your group can add entries and view supervisor feedback.</div>
 <?php endif; ?>
 
 <?php if (!$project_id): ?>
     <div class="alert alert-info">You need an approved project to maintain a logbook. Submit and get your topic approved first.</div>
 <?php else: ?>
+    <?php if (!$is_archived): ?>
     <div class="card mb-4" id="new-entry">
         <div class="card-header">Add New Entry</div>
         <div class="card-body">
@@ -183,6 +201,7 @@ require_once __DIR__ . '/../includes/header.php';
             </form>
         </div>
     </div>
+    <?php endif; ?>
 
     <div class="card">
         <div class="card-header">All Logbook Entries</div>

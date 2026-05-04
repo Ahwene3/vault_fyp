@@ -151,8 +151,20 @@ function get_project_member_ids(PDO $pdo, int $project_id): array {
     return array_values(array_unique($member_ids));
 }
 
+$is_archived = ($project['status'] ?? '') === 'archived';
+
 ensure_member_rating_table($pdo);
+ensure_project_contribution_status_table($pdo);
+ensure_pending_completion_status($pdo);
 $member_profiles = get_project_member_profiles($pdo, $project, $uid);
+
+// Load contribution_status for each member from the separate tracking table
+$contrib_stmt = $pdo->prepare('SELECT contribution_status FROM project_contribution_status WHERE project_id = ? AND student_id = ? LIMIT 1');
+foreach ($member_profiles as &$mp) {
+    $contrib_stmt->execute([$pid, (int) $mp['student_id']]);
+    $mp['contribution_status'] = $contrib_stmt->fetchColumn() ?: 'partial';
+}
+unset($mp);
 $member_profile_ids = array_map(static function ($m) {
     return (int) $m['student_id'];
 }, $member_profiles);
@@ -164,6 +176,10 @@ $documents = $stmt->fetchAll();
 
 // Submit document feedback
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
+    if ($is_archived) {
+        flash('error', 'This project is archived and cannot be modified.');
+        redirect(base_url('supervisor/student_detail.php?pid=' . $pid));
+    }
     $action = $_POST['action'] ?? '';
     if ($action === 'rate_contribution') {
         $member_id = (int) ($_POST['member_id'] ?? 0);
@@ -219,6 +235,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
         flash('success', 'Assessment saved.');
         redirect(base_url('supervisor/student_detail.php?pid=' . $pid));
     }
+    if ($action === 'update_contribution_status') {
+        $member_id = (int) ($_POST['member_id'] ?? 0);
+        $status = $_POST['contribution_status'] ?? '';
+        if (!in_array($member_id, $member_profile_ids, true)) {
+            flash('error', 'Invalid member selected.');
+            redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#contributions'));
+        }
+        if (!in_array($status, ['contributed', 'partial', 'not_contributed'], true)) {
+            flash('error', 'Invalid contribution status.');
+            redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#contributions'));
+        }
+        $pdo->prepare('INSERT INTO project_contribution_status (project_id, student_id, contribution_status, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE contribution_status = VALUES(contribution_status), updated_by = VALUES(updated_by), updated_at = NOW()')->execute([$pid, $member_id, $status, $uid]);
+        flash('success', 'Contribution status updated.');
+        redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#contributions'));
+    }
+    if ($action === 'submit_completion') {
+        if (!in_array($project['status'], ['in_progress', 'approved'], true)) {
+            flash('error', 'Project cannot be submitted for HOD review at this stage.');
+            redirect(base_url('supervisor/student_detail.php?pid=' . $pid));
+        }
+        $pdo->prepare('UPDATE projects SET status = "pending_completion" WHERE id = ? AND supervisor_id = ?')->execute([$pid, $uid]);
+
+        // Notify HOD of the department
+        $dept_stmt = $pdo->prepare('SELECT department FROM users WHERE id = ? LIMIT 1');
+        $dept_stmt->execute([(int) $project['student_id']]);
+        $dept = (string) ($dept_stmt->fetchColumn() ?: '');
+        if ($dept !== '') {
+            $hod_info = resolve_department_info($pdo, $dept);
+            if (!empty($hod_info['variants'])) {
+                $hod_ph = sql_placeholders(count($hod_info['variants']));
+                $hod_stmt = $pdo->prepare('SELECT id FROM users WHERE role = "hod" AND is_active = 1 AND LOWER(TRIM(COALESCE(department, ""))) IN (' . $hod_ph . ') LIMIT 1');
+                $hod_stmt->execute($hod_info['variants']);
+                $hod_id = (int) ($hod_stmt->fetchColumn() ?: 0);
+                if ($hod_id > 0) {
+                    $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([
+                        $hod_id, 'pending_completion', 'Project ready for HOD review',
+                        'A supervisor has marked a project complete and submitted it for your review: ' . ($project['title'] ?? ''),
+                        base_url('hod/archive.php')
+                    ]);
+                }
+            }
+        }
+
+        foreach (get_project_member_ids($pdo, $pid) as $member_id) {
+            $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([
+                $member_id, 'pending_completion', 'Project submitted for final review',
+                'Your supervisor has submitted your project to the HOD for final review.',
+                base_url('student/project.php')
+            ]);
+        }
+        flash('success', 'Project submitted to HOD for final review.');
+        redirect(base_url('supervisor/student_detail.php?pid=' . $pid));
+    }
 }
 
 $assessments = $pdo->prepare('SELECT * FROM assessments WHERE project_id = ? ORDER BY submitted_at DESC');
@@ -238,16 +307,34 @@ require_once __DIR__ . '/../includes/header.php';
     <p class="text-muted"><?= e($project['title']) ?> — <span class="badge bg-secondary"><?= e($project['status']) ?></span></p>
 <?php endif; ?>
 
-<div class="mb-3">
-    <a href="<?= base_url('supervisor/logsheet.php?pid=' . $pid) ?>" class="btn btn-outline-primary me-2">
+<?php if ($is_archived): ?>
+    <div class="alert alert-secondary d-flex align-items-center gap-2 mb-3">
+        <i class="bi bi-archive-fill fs-5"></i>
+        <div>This project is <strong>archived</strong>. All history is visible, but no modifications are permitted.</div>
+    </div>
+<?php endif; ?>
+
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+    <a href="<?= base_url('supervisor/logsheet.php?pid=' . $pid) ?>" class="btn btn-outline-primary">
         <i class="bi bi-journal-text"></i> Log Sheet
     </a>
-    <a href="<?= base_url('supervisor/assessment.php?pid=' . $pid) ?>" class="btn btn-outline-success me-2">
+    <a href="<?= base_url('supervisor/assessment.php?pid=' . $pid) ?>" class="btn btn-outline-success">
         <i class="bi bi-award"></i> Assessment Sheet
     </a>
     <a href="<?= base_url('supervisor/export_log.php?pid=' . $pid) ?>" class="btn btn-outline-secondary">
         <i class="bi bi-download"></i> Export Activity Log
     </a>
+    <?php if (!$is_archived && in_array($project['status'], ['in_progress', 'approved'], true)): ?>
+        <form method="post" class="d-inline">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="submit_completion">
+            <button type="submit" class="btn btn-warning" onclick="return confirm('Submit this project to HOD for final review? Make sure contribution statuses are set correctly.')">
+                <i class="bi bi-send-check"></i> Submit for HOD Review
+            </button>
+        </form>
+    <?php elseif (!$is_archived && $project['status'] === 'pending_completion'): ?>
+        <span class="btn btn-success disabled"><i class="bi bi-hourglass-split"></i> Awaiting HOD Review</span>
+    <?php endif; ?>
 </div>
 
 <ul class="nav nav-tabs mb-4" id="detailTabs" role="tablist">
@@ -416,11 +503,17 @@ require_once __DIR__ . '/../includes/header.php';
                                     <th>Logbook</th>
                                     <th>Messages</th>
                                     <th>Input Score</th>
+                                    <th style="min-width: 200px;">Contribution Status</th>
                                     <th style="min-width: 320px;">Supervisor Rating</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($member_profiles as $m): ?>
+                                    <?php
+                                        $cs = $m['contribution_status'] ?? 'partial';
+                                        $cs_badge = $cs === 'contributed' ? 'bg-success' : ($cs === 'not_contributed' ? 'bg-danger' : 'bg-warning text-dark');
+                                        $cs_label = $cs === 'contributed' ? 'Contributed' : ($cs === 'not_contributed' ? 'Not Contributed' : 'Partial');
+                                    ?>
                                     <tr>
                                         <td>
                                             <?= e($m['full_name']) ?>
@@ -432,6 +525,20 @@ require_once __DIR__ . '/../includes/header.php';
                                         <td><?= (int) $m['logbook_entries'] ?></td>
                                         <td><?= (int) $m['messages_sent'] ?></td>
                                         <td><strong><?= (int) $m['activity_score'] ?></strong></td>
+                                        <td>
+                                            <span class="badge <?= $cs_badge ?> mb-1"><?= $cs_label ?></span>
+                                            <form method="post" class="d-flex gap-1 flex-wrap align-items-center mt-1">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="action" value="update_contribution_status">
+                                                <input type="hidden" name="member_id" value="<?= (int) $m['student_id'] ?>">
+                                                <select name="contribution_status" class="form-select form-select-sm" style="max-width: 165px;">
+                                                    <option value="partial" <?= $cs === 'partial' ? 'selected' : '' ?>>Partial</option>
+                                                    <option value="contributed" <?= $cs === 'contributed' ? 'selected' : '' ?>>Contributed</option>
+                                                    <option value="not_contributed" <?= $cs === 'not_contributed' ? 'selected' : '' ?>>Not Contributed</option>
+                                                </select>
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary">Set</button>
+                                            </form>
+                                        </td>
                                         <td>
                                             <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
                                                 <?= csrf_field() ?>

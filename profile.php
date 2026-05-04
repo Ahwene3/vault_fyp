@@ -48,6 +48,7 @@ $stmt = $pdo->prepare('SELECT email, full_name, role, department, reg_number, ph
 $stmt->execute([$uid]);
 $profile = $stmt->fetch();
 [$first_name, $last_name] = split_profile_name((string) ($profile['full_name'] ?? ''));
+$student_id_display = (string) ($profile['reg_number'] ?: $uid);
 
 $pageTitle = 'Profile';
 require_once __DIR__ . '/includes/header.php';
@@ -72,7 +73,7 @@ require_once __DIR__ . '/includes/header.php';
                 <h2 class="h4 mb-0"><?= e($profile['full_name']) ?></h2>
                 <span class="badge bg-success student-badge-green">Active Student</span>
             </div>
-            <div class="text-muted"><?= e(($profile['reg_number'] ?: '—')) ?> · Student ID #<?= (int) $uid ?> · <?= e($profile['department'] ?: 'No department') ?></div>
+            <div class="text-muted">Student ID #<?= e($student_id_display) ?> · <?= e($profile['department'] ?: 'No department') ?></div>
             <div class="text-muted small"><?= e($profile['email']) ?></div>
         </div>
     </div>
@@ -96,7 +97,7 @@ require_once __DIR__ . '/includes/header.php';
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="student_id">Student ID</label>
-                            <input type="text" class="form-control" id="student_id" value="<?= (int) $uid ?>" readonly>
+                            <input type="text" class="form-control" id="student_id" value="<?= e($student_id_display) ?>" readonly>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="index_number">Index Number</label>

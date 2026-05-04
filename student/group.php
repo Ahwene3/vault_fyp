@@ -15,6 +15,21 @@ $stmt = $pdo->prepare('SELECT g.*, COUNT(gm.id) AS member_count FROM `groups` g 
 $stmt->execute([$uid]);
 $current_group = $stmt->fetch();
 
+// Resolve group project status early so the archived guard works before POST handlers
+$group_project = null;
+if ($current_group) {
+    $gp_stmt = $pdo->prepare('SELECT p.id, p.title, p.status, u.full_name AS supervisor_name, u.email AS supervisor_email FROM projects p LEFT JOIN users u ON u.id = p.supervisor_id WHERE p.group_id = ? ORDER BY p.updated_at DESC LIMIT 1');
+    $gp_stmt->execute([(int) $current_group['id']]);
+    $group_project = $gp_stmt->fetch();
+}
+$is_archived = !empty($group_project) && ($group_project['status'] ?? '') === 'archived';
+
+// Block all mutations when the group's project is archived
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && $is_archived) {
+    flash('error', 'This group is archived. No changes are permitted.');
+    redirect(base_url('student/group.php'));
+}
+
 // Create new group
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && (($_POST['action'] ?? '') === 'create_group')) {
     $group_name = trim($_POST['group_name'] ?? '');
@@ -178,16 +193,6 @@ if ($current_group && (int) $current_group['created_by'] === $uid && (int) $curr
     $invite_candidates = $stmt->fetchAll();
 }
 
-$group_project = null;
-if ($current_group) {
-    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, u.full_name AS supervisor_name, u.email AS supervisor_email
-        FROM projects p
-        LEFT JOIN users u ON u.id = p.supervisor_id
-        WHERE p.group_id = ? ORDER BY p.updated_at DESC LIMIT 1');
-    $stmt->execute([(int) $current_group['id']]);
-    $group_project = $stmt->fetch();
-}
-
 $pageTitle = 'My Group';
 require_once __DIR__ . '/../includes/header.php';
 ?>
@@ -239,6 +244,13 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
+<?php if ($is_archived): ?>
+    <div class="alert alert-secondary d-flex align-items-center gap-2">
+        <i class="bi bi-archive-fill fs-5"></i>
+        <div>This group's project has been <strong>archived</strong>. Group history is preserved for your records, but no changes can be made.</div>
+    </div>
+<?php endif; ?>
+
 <?php if ($error): ?>
     <div class="alert alert-danger"><?= e($error) ?></div>
 <?php endif; ?>
@@ -247,7 +259,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="card mb-4">
         <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0"><?= e($current_group['name']) ?></h5>
-            <span class="badge bg-success student-badge-green">Active</span>
+            <span class="badge <?= $is_archived ? 'bg-secondary' : 'bg-success student-badge-green' ?>"><?= $is_archived ? 'Archived' : 'Active' ?></span>
         </div>
         <div class="card-body">
             <p class="text-muted"><?= e($current_group['description'] ?? 'No description') ?></p>
@@ -271,7 +283,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php endforeach; ?>
             </div>
 
-            <?php if ((int) $current_group['created_by'] === $uid): ?>
+            <?php if (!$is_archived && (int) $current_group['created_by'] === $uid): ?>
                 <hr>
                 <h6>Add / Invite Members</h6>
                 <?php if ((int) $current_group['member_count'] >= 5): ?>
@@ -299,8 +311,8 @@ require_once __DIR__ . '/../includes/header.php';
                     </form>
                 <?php endif; ?>
             <?php endif; ?>
-            
-            <?php if ($uid !== $current_group['created_by']): ?>
+
+            <?php if (!$is_archived && $uid !== $current_group['created_by']): ?>
                 <form method="post" class="mt-3">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="leave_group">

@@ -232,6 +232,79 @@ function get_department_display_name(PDO $pdo, ?string $department): string {
     return trim((string) $department);
 }
 
+function ensure_supervisor_logsheets_table(PDO $pdo): void {
+    $pdo->exec('CREATE TABLE IF NOT EXISTS supervisor_logsheets (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        supervisor_id INT UNSIGNED NOT NULL,
+        meeting_date DATE NOT NULL,
+        student_attendees TEXT NULL,
+        topics_discussed TEXT NOT NULL,
+        action_points TEXT NULL,
+        next_meeting_date DATE NULL,
+        supervisor_notes TEXT NULL,
+        confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id),
+        INDEX idx_supervisor (supervisor_id),
+        CONSTRAINT fk_sl_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        CONSTRAINT fk_sl_supervisor FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+}
+
+function ensure_pending_completion_status(PDO $pdo): void {
+    $stmt = $pdo->query("SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'projects' AND COLUMN_NAME = 'status'");
+    $col_type = (string) $stmt->fetchColumn();
+    if (strpos($col_type, 'pending_completion') !== false) {
+        return;
+    }
+    try {
+        $pdo->exec("ALTER TABLE projects MODIFY COLUMN status ENUM('draft','submitted','approved','rejected','in_progress','completed','pending_completion','archived') DEFAULT 'draft'");
+    } catch (Throwable $ex) {
+        if (stripos($ex->getMessage(), 'duplicate') === false) {
+            throw $ex;
+        }
+    }
+}
+
+function ensure_student_tracking_columns(PDO $pdo): void {
+    $stmt = $pdo->prepare('SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "users" AND COLUMN_NAME IN (?, ?)');
+    $stmt->execute(['student_project_status', 'repeat_required']);
+    $existing = array_map('strtolower', array_column($stmt->fetchAll(), 'COLUMN_NAME'));
+
+    if (!in_array('student_project_status', $existing, true)) {
+        try {
+            $pdo->exec("ALTER TABLE users ADD COLUMN student_project_status ENUM('active','completed','failed') NOT NULL DEFAULT 'active'");
+        } catch (Throwable $ex) {
+            if (stripos($ex->getMessage(), 'duplicate column name') === false) {
+                throw $ex;
+            }
+        }
+    }
+    if (!in_array('repeat_required', $existing, true)) {
+        try {
+            $pdo->exec('ALTER TABLE users ADD COLUMN repeat_required TINYINT(1) NOT NULL DEFAULT 0');
+        } catch (Throwable $ex) {
+            if (stripos($ex->getMessage(), 'duplicate column name') === false) {
+                throw $ex;
+            }
+        }
+    }
+}
+
+function ensure_project_contribution_status_table(PDO $pdo): void {
+    $pdo->exec('CREATE TABLE IF NOT EXISTS project_contribution_status (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        student_id INT UNSIGNED NOT NULL,
+        contribution_status ENUM("contributed","partial","not_contributed") NOT NULL DEFAULT "partial",
+        updated_by INT UNSIGNED NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_project_student (project_id, student_id),
+        INDEX idx_project (project_id),
+        INDEX idx_student (student_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+}
+
 function has_other_active_hod_in_department(PDO $pdo, string $department, int $excludeUserId = 0): bool {
     $info = resolve_department_info($pdo, $department);
     if (empty($info['variants'])) {

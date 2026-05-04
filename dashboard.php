@@ -10,6 +10,14 @@ $pdo = getPDO();
 // Role-specific dashboard data
 $stats = [];
 if ($role === 'student') {
+    ensure_student_tracking_columns($pdo);
+    $tracking_stmt = $pdo->prepare('SELECT student_project_status, repeat_required FROM users WHERE id = ? LIMIT 1');
+    $tracking_stmt->execute([$uid]);
+    $student_tracking = $tracking_stmt->fetch() ?: ['student_project_status' => 'active', 'repeat_required' => 0];
+    $stats['student_project_status'] = $student_tracking['student_project_status'] ?? 'active';
+    $stats['repeat_required'] = (bool) ($student_tracking['repeat_required'] ?? 0);
+}
+if ($role === 'student') {
     // Get student's group
     $stmt = $pdo->prepare('SELECT g.id, g.name, g.created_by, COUNT(gm.id) AS member_count FROM `groups` g LEFT JOIN `group_members` gm ON g.id = gm.group_id WHERE g.id IN (SELECT group_id FROM `group_members` WHERE student_id = ?) GROUP BY g.id LIMIT 1');
     $stmt->execute([$uid]);
@@ -150,10 +158,18 @@ $appSidebarRoleLabel = $role === 'supervisor' ? 'Supervisor Portal' : strtoupper
 $hideFooter = true;
 
 if ($role === 'student') {
-    $hero_title = 'Build your project with confidence';
-    $hero_copy = 'Access your group, update your project, and keep your logbook current from one dashboard.';
-    $hero_link = 'student/project.php';
-    $hero_button = 'Go to My Project';
+    $student_archived_early = !empty($stats['student_project_status']) && $stats['student_project_status'] !== 'active';
+    if ($student_archived_early) {
+        $hero_title = 'Your project journey is complete';
+        $hero_copy = 'Browse the project vault to explore archived final year projects from past cohorts.';
+        $hero_link = 'vault.php';
+        $hero_button = 'Browse Vault';
+    } else {
+        $hero_title = 'Build your project with confidence';
+        $hero_copy = 'Access your group, update your project, and keep your logbook current from one dashboard.';
+        $hero_link = 'student/project.php';
+        $hero_button = 'Go to My Project';
+    }
 } elseif ($role === 'supervisor') {
     $hero_title = 'Monitor your assigned vaults';
     $hero_copy = 'Review student progress, clear pending logbook approvals, and reply to messages faster.';
@@ -210,7 +226,49 @@ require_once __DIR__ . '/includes/header.php';
 </section>
 <section class="dashboard-main-panels">
 
-<?php if ($role === 'student'): ?>
+<?php
+$is_project_archived = !empty($stats['project']) && ($stats['project']['status'] ?? '') === 'archived';
+?>
+
+<?php if ($role === 'student' && $is_project_archived): ?>
+    <?php
+        $sps = $stats['student_project_status'] ?? 'completed';
+        $repeat = !empty($stats['repeat_required']);
+    ?>
+    <div class="card mb-4">
+        <div class="card-body text-center py-5">
+            <div class="mb-3">
+                <i class="bi bi-archive-fill" style="font-size: 3rem; color: var(--hod-accent, #4f46e5);"></i>
+            </div>
+            <h3 class="mb-2">
+                <?php if ($sps === 'failed'): ?>Your project was not completed successfully.
+                <?php else: ?>Your project has been completed and archived.
+                <?php endif; ?>
+            </h3>
+            <p class="text-muted mb-1">
+                <?php if ($repeat): ?>
+                    You are required to repeat this project in the next session. You will be able to join a new group.
+                <?php else: ?>
+                    Congratulations! Your Final Year Project has been successfully archived in the vault.
+                <?php endif; ?>
+            </p>
+            <?php if ($sps === 'failed'): ?>
+                <span class="badge bg-danger mb-3">Project Status: Failed</span>
+            <?php else: ?>
+                <span class="badge bg-success mb-3">Project Status: Completed</span>
+            <?php endif; ?>
+            <div class="mt-4 d-flex gap-2 justify-content-center">
+                <a href="<?= base_url('vault.php') ?>" class="btn btn-primary">
+                    <i class="bi bi-folder2-open me-1"></i> Browse Archived Projects
+                </a>
+                <a href="<?= base_url('messages.php') ?>" class="btn btn-outline-secondary">
+                    <i class="bi bi-envelope-paper me-1"></i> Messages
+                </a>
+            </div>
+        </div>
+    </div>
+
+<?php elseif ($role === 'student'): ?>
     <div class="student-scope-row mb-3">
         <span class="student-scope-label">Department scope:</span>
         <span class="student-scope-pill">Student View</span>

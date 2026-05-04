@@ -12,7 +12,7 @@ if ($id <= 0) {
 }
 
 $pdo = getPDO();
-$stmt = $pdo->prepare('SELECT pd.id, pd.file_name, pd.file_path, pd.mime_type, p.student_id, p.supervisor_id, p.group_id FROM project_documents pd JOIN projects p ON pd.project_id = p.id WHERE pd.id = ?');
+$stmt = $pdo->prepare('SELECT pd.id, pd.file_name, pd.file_path, pd.mime_type, p.student_id, p.supervisor_id, p.group_id, p.status AS project_status FROM project_documents pd JOIN projects p ON pd.project_id = p.id WHERE pd.id = ?');
 $stmt->execute([$id]);
 $doc = $stmt->fetch();
 if (!$doc) {
@@ -29,7 +29,8 @@ if (!empty($doc['group_id'])) {
     $is_group_member = (bool) $stmt->fetchColumn();
 }
 
-$allowed = ($doc['student_id'] == $uid) || ($doc['supervisor_id'] == $uid) || $is_group_member || $role === 'hod' || $role === 'admin';
+$is_archived = ($doc['project_status'] === 'archived');
+$allowed = ($doc['student_id'] == $uid) || ($doc['supervisor_id'] == $uid) || $is_group_member || $role === 'hod' || $role === 'admin' || $is_archived;
 if (!$allowed) {
     http_response_code(403);
     exit('Access denied');

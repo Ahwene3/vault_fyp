@@ -7,6 +7,7 @@ require_role('supervisor');
 
 $uid = user_id();
 $pdo = getPDO();
+ensure_supervisor_logsheets_table($pdo);
 $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
 
 $stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.reg_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND p.supervisor_id = ?');
