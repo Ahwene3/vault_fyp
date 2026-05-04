@@ -342,7 +342,7 @@ require_once __DIR__ . '/includes/header.php';
                             $stmt->execute([(int) $c['id'], $uid]);
                             $thread_unread = (int) $stmt->fetchColumn();
                         ?>
-                        <a href="<?= base_url('messages.php?pid=' . $c['id'] . '&with=' . $target_id) ?>" class="list-group-item list-group-item-action <?= $project_id == $c['id'] ? 'active' : '' ?> student-inbox-row <?= $project_id == $c['id'] ? 'is-unread' : '' ?>">
+                        <a href="<?= base_url('messages.php?pid=' . $c['id'] . '&with=' . $target_id) ?>" class="list-group-item list-group-item-action <?= $project_id == $c['id'] ? 'active' : '' ?> student-inbox-row <?= $thread_unread > 0 ? 'is-unread' : '' ?>">
                             <span class="student-inbox-row__avatar"><?= e(strtoupper(substr((string) ($c['other_name'] ?? $c['title']), 0, 1))) ?></span>
                             <div class="flex-grow-1">
                                 <div class="d-flex align-items-start justify-content-between gap-2">

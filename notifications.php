@@ -6,21 +6,20 @@ $uid = user_id();
 $pdo = getPDO();
 
 if (isset($_GET['open'])) {
-    $open_id = (int) $_GET['open'];
-    if ($open_id > 0) {
-        $stmt = $pdo->prepare('SELECT link FROM notifications WHERE id = ? AND user_id = ? LIMIT 1');
-        $stmt->execute([$open_id, $uid]);
-        $notification_link = $stmt->fetchColumn();
+    $notification_id = (int) $_GET['open'];
+    if ($notification_id > 0) {
+        $stmt = $pdo->prepare('SELECT id, link FROM notifications WHERE id = ? AND user_id = ? LIMIT 1');
+        $stmt->execute([$notification_id, $uid]);
+        $notification = $stmt->fetch();
 
-        if ($notification_link !== false) {
-            $pdo->prepare('UPDATE notifications SET is_read = 1, read_at = NOW() WHERE id = ? AND user_id = ?')->execute([$open_id, $uid]);
-            if (!empty($notification_link)) {
-                redirect($notification_link);
-            }
-            flash('success', 'Notification marked as read.');
-            redirect(base_url('notifications.php'));
+        if ($notification) {
+            $pdo->prepare('UPDATE notifications SET is_read = 1, read_at = NOW() WHERE id = ?')->execute([$notification_id]);
+            $target = $notification['link'] ?: base_url('notifications.php');
+            redirect($target);
         }
     }
+
+    redirect(base_url('notifications.php'));
 }
 
 if (isset($_POST['mark_read']) && csrf_verify()) {
@@ -95,7 +94,7 @@ require_once __DIR__ . '/includes/header.php';
         <?php else: ?>
             <?php foreach ($notifications as $n): ?>
                 <?php $is_unread = empty($n['is_read']); ?>
-                <a href="<?= $n['link'] ? htmlspecialchars($n['link']) : '#' ?>" class="list-group-item list-group-item-action <?= $is_unread ? 'student-inbox-row is-unread' : 'student-inbox-row' ?>">
+                <a href="<?= base_url('notifications.php?open=' . (int) $n['id']) ?>" class="list-group-item list-group-item-action <?= $is_unread ? 'student-inbox-row is-unread' : 'student-inbox-row' ?>">
                     <span class="student-inbox-row__avatar">
                         <span class="student-notification-dot <?= $is_unread ? 'is-unread' : 'is-read' ?>"></span>
                     </span>

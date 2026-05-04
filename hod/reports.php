@@ -192,11 +192,251 @@ if (!empty($hod_department_variants)) {
     $ongoing_projects = $stmt->fetchAll();
 }
 
+$export_format = strtolower(trim((string) ($_GET['export'] ?? '')));
+if ($export_format !== '') {
+    $export_type = $report_type ?: 'overview';
+    $file_stamp = date('Ymd_His');
+    $export_ext = 'html';
+    $export_content_type = 'text/html; charset=utf-8';
+
+    if ($export_format === 'pdf') {
+        $export_ext = 'pdf';
+        $export_content_type = 'application/pdf';
+    } elseif (in_array($export_format, ['word', 'doc', 'docx'], true)) {
+        $export_ext = 'doc';
+        $export_content_type = 'application/msword';
+    }
+
+    header('Content-Type: ' . $export_content_type);
+    header('Content-Disposition: attachment; filename="HOD_Report_' . $export_type . '_' . $file_stamp . '.' . $export_ext . '"');
+    ?>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Department Report - <?= e(ucfirst($export_type)) ?></title>
+        <style>
+            * { font-family: Arial, sans-serif; }
+            body { padding: 20px; line-height: 1.6; color: #111827; }
+            h1 { color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 18px; }
+            h2 { color: #1f2937; margin-top: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+            .meta { background: #f8fafc; padding: 10px 12px; border-left: 4px solid #2563eb; margin-bottom: 18px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { padding: 8px 10px; text-align: left; border: 1px solid #e5e7eb; vertical-align: top; }
+            th { background: #2563eb; color: #fff; }
+            tr:nth-child(even) { background: #f8fafc; }
+            .note { font-size: 0.9rem; color: #4b5563; }
+            @media print { body { padding: 0; } }
+        </style>
+    </head>
+    <body>
+        <h1>Department Report - <?= e(ucfirst($export_type)) ?></h1>
+        <div class="meta">
+            <p><strong>Department:</strong> <?= e($hod_department_label ?: 'Unknown') ?></p>
+            <p><strong>Generated:</strong> <?= e(date('M j, Y H:i')) ?></p>
+        </div>
+
+        <?php if ($department_scope_error): ?>
+            <p><strong>Notice:</strong> <?= e($department_scope_error) ?></p>
+        <?php elseif ($export_type === 'overview'): ?>
+            <h2>Summary</h2>
+            <table>
+                <tbody>
+                    <tr><th>Total Vaults</th><td><?= (int) $total_vaults ?></td></tr>
+                    <tr><th>Completion Rate</th><td><?= e($completion_rate) ?>%</td></tr>
+                    <tr><th>Ongoing Projects</th><td><?= (int) $ongoing ?></td></tr>
+                    <tr><th>Pending Topics</th><td><?= (int) $pending_topics ?></td></tr>
+                </tbody>
+            </table>
+
+            <h2>By Status</h2>
+            <table>
+                <thead><tr><th>Status</th><th>Count</th></tr></thead>
+                <tbody>
+                    <?php foreach ($by_status as $r): ?>
+                        <tr><td><?= e($r['status']) ?></td><td><?= (int) $r['cnt'] ?></td></tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <h2>Ongoing Projects</h2>
+            <?php if (empty($ongoing_projects)): ?>
+                <p>No ongoing projects in this department.</p>
+            <?php else: ?>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Vault</th>
+                            <th>Project</th>
+                            <th>Members / Index</th>
+                            <th>Supervisor</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($ongoing_projects as $op): ?>
+                            <tr>
+                                <td><?= e($op['vault_name']) ?></td>
+                                <td><?= e($op['title']) ?></td>
+                                <td><?= e($op['member_directory'] ?: '-') ?></td>
+                                <td><?= e($op['supervisor_name'] ?: 'Not assigned') ?></td>
+                                <td><?= e($op['status']) ?></td>
+                                <td><?= e(date('M j, Y', strtotime($op['updated_at']))) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        <?php elseif ($export_type === 'supervisor'): ?>
+            <h2>Supervisor Workload</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Supervisor</th>
+                        <th>Total Projects</th>
+                        <th>Active Projects</th>
+                        <th>Workload %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                    $total_active = array_sum(array_column($supervisor_workload, 'active_count'));
+                    foreach ($supervisor_workload as $s):
+                        $pct = $total_active > 0 ? round(($s['active_count'] / $total_active) * 100, 1) : 0;
+                    ?>
+                        <tr>
+                            <td><?= e($s['full_name']) ?></td>
+                            <td><?= (int) $s['project_count'] ?></td>
+                            <td><?= (int) $s['active_count'] ?></td>
+                            <td><?= e($pct) ?>%</td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php elseif ($export_type === 'duplicates'): ?>
+            <h2>Duplicate Topics</h2>
+            <?php if (empty($duplicate_topics)): ?>
+                <p>No duplicate topics found.</p>
+            <?php else: ?>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Topic</th>
+                            <th>Count</th>
+                            <th>Vaults</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($duplicate_topics as $dup): ?>
+                            <tr>
+                                <td><?= e($dup['title']) ?></td>
+                                <td><?= (int) $dup['count'] ?></td>
+                                <td><?= e($dup['vaults']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        <?php elseif ($export_type === 'pending'): ?>
+            <h2>Pending Topic Approvals</h2>
+            <?php if (empty($pending_list)): ?>
+                <p>No pending topics.</p>
+            <?php else: ?>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Project</th>
+                            <th>Vault</th>
+                            <th>Members / Index</th>
+                            <th>Docs</th>
+                            <th>Logbook</th>
+                            <th>Messages</th>
+                            <th>Submitted</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($pending_list as $p): ?>
+                            <?php
+                            $vault_label = !empty($p['group_id'])
+                                ? ('Group: ' . ($p['group_name'] ?: ('#' . $p['group_id'])))
+                                : ('Solo: ' . ($p['full_name'] ?? '-') . ' (' . ($p['reg_number'] ?? $p['email']) . ')');
+                            ?>
+                            <tr>
+                                <td><?= e($p['title']) ?></td>
+                                <td><?= e($vault_label) ?></td>
+                                <td><?= e($p['member_directory'] ?: '-') ?></td>
+                                <td><?= (int) ($p['docs_count'] ?? 0) ?></td>
+                                <td><?= (int) ($p['logbook_count'] ?? 0) ?></td>
+                                <td><?= (int) ($p['message_count'] ?? 0) ?></td>
+                                <td><?= e(date('M j, Y', strtotime($p['submitted_at']))) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        <?php elseif ($export_type === 'contributions'): ?>
+            <h2>Group Member Contributions</h2>
+            <p class="note">Input score formula: documents x 3 + logbook entries x 2 + messages sent.</p>
+            <?php if (empty($contribution_rows)): ?>
+                <p>No contribution data yet.</p>
+            <?php else: ?>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Vault</th>
+                            <th>Project</th>
+                            <th>Member</th>
+                            <th>Index</th>
+                            <th>Supervisor</th>
+                            <th>Docs</th>
+                            <th>Logbook</th>
+                            <th>Messages</th>
+                            <th>Input Score</th>
+                            <th>Supervisor Rating</th>
+                            <th>Note</th>
+                            <th>Rated At</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($contribution_rows as $row): ?>
+                            <?php $input_score = ((int) $row['docs_uploaded'] * 3) + ((int) $row['logbook_entries'] * 2) + (int) $row['messages_sent']; ?>
+                            <tr>
+                                <td><?= e($row['vault_name']) ?></td>
+                                <td><?= e($row['title']) ?></td>
+                                <td><?= e($row['member_name']) ?></td>
+                                <td><?= e($row['member_index']) ?></td>
+                                <td><?= e($row['supervisor_name'] ?? '-') ?></td>
+                                <td><?= (int) $row['docs_uploaded'] ?></td>
+                                <td><?= (int) $row['logbook_entries'] ?></td>
+                                <td><?= (int) $row['messages_sent'] ?></td>
+                                <td><?= (int) $input_score ?></td>
+                                <td><?= $row['rating_score'] !== null ? e(number_format((float) $row['rating_score'], 2)) : '-' ?></td>
+                                <td><?= e($row['rating_note'] ?? '-') ?></td>
+                                <td><?= !empty($row['rated_at']) ? e(date('M j, Y H:i', strtotime($row['rated_at']))) : '-' ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        <?php endif; ?>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
 $pageTitle = 'Department Reports';
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
-<h1 class="mb-4">Department Reports</h1>
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-4 gap-2">
+    <h1 class="mb-0">Department Reports</h1>
+    <div class="btn-group">
+        <a class="btn btn-outline-primary btn-sm" href="<?= base_url('hod/reports.php?type=' . $report_type . '&export=pdf') ?>">Download PDF</a>
+        <a class="btn btn-outline-primary btn-sm" href="<?= base_url('hod/reports.php?type=' . $report_type . '&export=word') ?>">Download Word</a>
+    </div>
+</div>
 
 <?php if ($department_scope_error): ?>
     <div class="alert alert-danger"><?= e($department_scope_error) ?></div>

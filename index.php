@@ -426,6 +426,9 @@ $pageTitle = 'Login';
                         <a href="#" class="text-slate-400 transition hover:text-cyan-200" onclick="return false;">Forgot Password?</a>
                         <a href="<?= base_url('register.php') ?>" class="font-semibold text-cyan-200 transition hover:text-white">Create account</a>
                     </div>
+                    <p class="mt-3 text-xs text-slate-400">
+                        Registration is only for students without an existing account. Supervisor, HOD, and admin accounts are created by the department.
+                    </p>
                 </div>
             </section>
         </main>
