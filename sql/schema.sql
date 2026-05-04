@@ -19,11 +19,24 @@ CREATE TABLE users (
     reg_number VARCHAR(100) DEFAULT NULL COMMENT 'Student registration number',
     phone VARCHAR(50) DEFAULT NULL,
     is_active TINYINT(1) DEFAULT 1,
+    is_verified TINYINT(1) NOT NULL DEFAULT 1,
+    verified_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_role (role),
     INDEX idx_email (email),
     INDEX idx_active (is_active)
+) ENGINE=InnoDB;
+
+-- OTP verification records (hashed OTP + expiry + cooldown)
+CREATE TABLE otp_verifications (
+    email VARCHAR(255) NOT NULL PRIMARY KEY,
+    otp_hash VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    resend_available_at DATETIME NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_expires_at (expires_at)
 ) ENGINE=InnoDB;
 
 -- Projects (student project topics and status)

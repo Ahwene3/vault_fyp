@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/otp.php';
 
 if (is_logged_in()) {
     redirect(base_url('dashboard.php'));
@@ -9,6 +10,7 @@ $error = '';
 $departments = [];
 
 $pdo = getPDO();
+ensure_otp_schema($pdo);
 $stmt = $pdo->prepare('SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name');
 $stmt->execute();
 $departments = $stmt->fetchAll();
@@ -49,12 +51,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($stmt->fetch()) {
                 $error = 'Email already registered.';
             } else {
+                $requires_otp = should_require_otp_for_role('student');
                 $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, reg_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt->execute([$email, $hash, $full_name, $first_name, $last_name, $level ?: null, 'student', $department ?: null, $index_number ?: null]);
+                $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, reg_number, is_verified, verified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                $stmt->execute([
+                    $email,
+                    $hash,
+                    $full_name,
+                    $first_name,
+                    $last_name,
+                    $level ?: null,
+                    'student',
+                    $department ?: null,
+                    $index_number ?: null,
+                    $requires_otp ? 0 : 1,
+                    $requires_otp ? null : date('Y-m-d H:i:s')
+                ]);
 
-                flash('success', 'Registration successful. Log in now.');
-                redirect(base_url('index.php'));
+                if ($requires_otp) {
+                    $_SESSION['pending_verification_email'] = $email;
+                    $recipient_name = $full_name ?: $first_name;
+                    $otp_error = null;
+                    if (issue_and_send_otp($pdo, $email, (string) $recipient_name, $otp_error)) {
+                        flash('success', 'Registration successful. We sent a verification code to your email.');
+                    } else {
+                        flash('error', 'Account created, but OTP email failed to send. ' . ($otp_error ?: 'Please try resending OTP.'));
+                    }
+                    redirect(base_url('verify_otp.php'));
+                } else {
+                    flash('success', 'Registration successful. You can now sign in.');
+                    redirect(base_url('index.php'));
+                }
             }
         }
     }
@@ -102,6 +129,20 @@ $pageTitle = 'Register';
                 linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
             background-size: 56px 56px;
             mask-image: radial-gradient(circle at center, black 36%, transparent 88%);
+        }
+
+        .fyp-dark-select {
+            color: #e2e8f0;
+            background-color: rgba(15, 23, 42, 0.72);
+        }
+
+        .fyp-dark-select option {
+            color: #e2e8f0;
+            background-color: #0f172a;
+        }
+
+        .fyp-dark-select option[value=""] {
+            color: #94a3b8;
         }
 
         .vault-scene {
@@ -438,7 +479,7 @@ $pageTitle = 'Register';
                                     id="department"
                                     name="department"
                                     required
-                                    class="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-300/70 focus:ring-4 focus:ring-cyan-400/15"
+                                    class="fyp-dark-select w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-300/70 focus:ring-4 focus:ring-cyan-400/15"
                                 >
                                     <option value="">Select department</option>
                                     <?php foreach ($departments as $dept): ?>
@@ -454,7 +495,7 @@ $pageTitle = 'Register';
                                     id="level"
                                     name="level"
                                     required
-                                    class="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-300/70 focus:ring-4 focus:ring-cyan-400/15"
+                                    class="fyp-dark-select w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-300/70 focus:ring-4 focus:ring-cyan-400/15"
                                 >
                                     <option value="">Select level</option>
                                     <?php foreach (['100', '200', '300', '400'] as $option): ?>

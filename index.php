@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/otp.php';
 
 if (is_logged_in()) {
     redirect(base_url('dashboard.php'));
@@ -18,7 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo = getPDO();
             ensure_user_archive_columns($pdo);
-            $stmt = $pdo->prepare('SELECT id, email, password_hash, full_name, role, department, is_active, archived_permanent FROM users WHERE email = ?');
+            ensure_email_verification_columns($pdo);
+            $stmt = $pdo->prepare('SELECT id, email, password_hash, full_name, role, department, is_active, archived_permanent, is_verified FROM users WHERE email = ?');
             $stmt->execute([$email]);
             $user = $stmt->fetch();
 
@@ -27,6 +29,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = ((int) ($user['archived_permanent'] ?? 0) === 1)
                         ? 'Your account has been permanently archived and cannot be restored.'
                         : 'Your account is archived. Contact admin for restoration.';
+                } elseif (should_require_otp_for_role((string) ($user['role'] ?? '')) && (int) ($user['is_verified'] ?? 1) !== 1) {
+                    $_SESSION['pending_verification_email'] = $user['email'];
+                    flash('error', 'Please verify your email before signing in.');
+                    redirect(base_url('verify_otp.php'));
                 } else {
                     login_user($user);
                     redirect(base_url('dashboard.php'));
