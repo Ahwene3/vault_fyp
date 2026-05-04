@@ -5,6 +5,24 @@ require_login();
 $uid = user_id();
 $pdo = getPDO();
 
+if (isset($_GET['open'])) {
+    $open_id = (int) $_GET['open'];
+    if ($open_id > 0) {
+        $stmt = $pdo->prepare('SELECT link FROM notifications WHERE id = ? AND user_id = ? LIMIT 1');
+        $stmt->execute([$open_id, $uid]);
+        $notification_link = $stmt->fetchColumn();
+
+        if ($notification_link !== false) {
+            $pdo->prepare('UPDATE notifications SET is_read = 1, read_at = NOW() WHERE id = ? AND user_id = ?')->execute([$open_id, $uid]);
+            if (!empty($notification_link)) {
+                redirect($notification_link);
+            }
+            flash('success', 'Notification marked as read.');
+            redirect(base_url('notifications.php'));
+        }
+    }
+}
+
 if (isset($_POST['mark_read']) && csrf_verify()) {
     $pdo->prepare('UPDATE notifications SET is_read = 1, read_at = NOW() WHERE user_id = ?')->execute([$uid]);
     flash('success', 'All notifications marked as read.');

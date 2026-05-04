@@ -39,6 +39,44 @@ function fetch_group_project(PDO $pdo, int $group_id): ?array {
     return $project ?: null;
 }
 
+function project_notification_recipient_ids(PDO $pdo, array $project, int $exclude_user_id): array {
+    $recipient_ids = [];
+
+    if (!empty($project['supervisor_id'])) {
+        $recipient_ids[] = (int) $project['supervisor_id'];
+    }
+
+    if (!empty($project['group_id'])) {
+        $stmt = $pdo->prepare('SELECT student_id FROM `group_members` WHERE group_id = ?');
+        $stmt->execute([(int) $project['group_id']]);
+        foreach ($stmt->fetchAll() as $row) {
+            $recipient_ids[] = (int) $row['student_id'];
+        }
+    } elseif (!empty($project['student_id'])) {
+        $recipient_ids[] = (int) $project['student_id'];
+    }
+
+    return array_values(array_unique(array_filter($recipient_ids, static function ($recipient_id) use ($exclude_user_id) {
+        return (int) $recipient_id > 0 && (int) $recipient_id !== $exclude_user_id;
+    })));
+}
+
+function project_recipient_roles(PDO $pdo, array $recipient_ids): array {
+    if (empty($recipient_ids)) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare('SELECT id, role FROM users WHERE id IN (' . sql_placeholders(count($recipient_ids)) . ')');
+    $stmt->execute($recipient_ids);
+
+    $roles = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $roles[(int) $row['id']] = (string) $row['role'];
+    }
+
+    return $roles;
+}
+
 // Determine if student belongs to a group (max 5 members flow)
 $stmt = $pdo->prepare('SELECT gm.group_id, g.name FROM `group_members` gm JOIN `groups` g ON g.id = gm.group_id WHERE gm.student_id = ? AND g.is_active = 1 LIMIT 1');
 $stmt->execute([$uid]);
@@ -166,18 +204,51 @@ if ($project && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && isset(
                 $path = $upload_dir . '/' . $safe_name;
                 if (move_uploaded_file($file['tmp_name'], $path)) {
                     $rel = 'projects/' . $project['id'] . '/' . $safe_name;
-                    
-                    // Mark previous versions as not latest
-                    $pdo->prepare('UPDATE project_documents SET is_latest = 0 WHERE project_id = ? AND document_type = ? AND is_latest = 1')->execute([$project['id'], $doc_type]);
-                    
-                    // Insert new version with chapter if applicable
-                    $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, chapter, file_name, file_path, file_size, mime_type, uploader_id, version_number, is_latest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
-                    $stmt->execute([$project['id'], $doc_type, $chapter, $file['name'], $rel, $file['size'], $file['type'], $uid, $next_version]);
-                    if ($project['supervisor_id']) {
-                        $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)')->execute([$project['supervisor_id'], 'new_upload', 'New document uploaded', 'A student uploaded a document.', base_url('supervisor/students.php?pid=' . $project['id'])]);
+                    $recipient_ids = project_notification_recipient_ids($pdo, $project, $uid);
+                    $recipient_roles = project_recipient_roles($pdo, $recipient_ids);
+
+                    try {
+                        $pdo->beginTransaction();
+
+                        // Mark previous versions as not latest
+                        $pdo->prepare('UPDATE project_documents SET is_latest = 0 WHERE project_id = ? AND document_type = ? AND is_latest = 1')->execute([$project['id'], $doc_type]);
+
+                        // Insert new version with chapter if applicable
+                        $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, chapter, file_name, file_path, file_size, mime_type, uploader_id, version_number, is_latest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
+                        $stmt->execute([$project['id'], $doc_type, $chapter, $file['name'], $rel, $file['size'], $file['type'], $uid, $next_version]);
+
+                        $insert_notification = $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)');
+                        foreach ($recipient_ids as $recipient_id) {
+                            $recipient_role = $recipient_roles[$recipient_id] ?? 'student';
+                            $title = 'New project update';
+                            $message = 'A new documentation upload is ready for your project.';
+                            $link = base_url('student/project.php');
+
+                            if ($recipient_role === 'supervisor') {
+                                $title = 'New documentation uploaded';
+                                $message = 'A student uploaded new documentation for review.';
+                                $link = base_url('supervisor/student_detail.php?pid=' . $project['id']);
+                            } elseif ($recipient_role === 'student') {
+                                $title = 'Group documentation uploaded';
+                                $message = 'Your group has a new documentation upload to review.';
+                                $link = base_url('student/project.php');
+                            }
+
+                            $insert_notification->execute([$recipient_id, 'new_upload', $title, $message, $link]);
+                        }
+
+                        $pdo->commit();
+                        flash('success', 'Document uploaded successfully.');
+                        redirect(base_url('student/project.php'));
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        if (is_file($path)) {
+                            unlink($path);
+                        }
+                        $error = 'Unable to save the upload right now. Please try again.';
                     }
-                    flash('success', 'Document uploaded successfully.');
-                    redirect(base_url('student/project.php'));
                 } else {
                     $error = 'Upload failed. Please try again.';
                 }
