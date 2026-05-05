@@ -40,20 +40,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && (($_POST['action']
     } elseif (!$current_group) {
         try {
             $pdo->beginTransaction();
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM `group_members` WHERE student_id = ?');
+
+            // Only block if the student is in a non-archived active group.
+            // repeat_required students may still appear in archived group_members — that's fine.
+            $stmt = $pdo->prepare('
+                SELECT COUNT(*) FROM `group_members` gm
+                JOIN `groups` g ON g.id = gm.group_id
+                LEFT JOIN projects p ON p.group_id = g.id
+                WHERE gm.student_id = ?
+                  AND g.is_active = 1
+                  AND (p.status IS NULL OR p.status NOT IN ("archived"))
+            ');
             $stmt->execute([$uid]);
             if ((int) $stmt->fetchColumn() > 0) {
                 $pdo->rollBack();
-                $error = 'You are already in a group.';
+                $error = 'You are already in an active group.';
             } else {
+                // Clean up stale archived memberships and reset repeat flags before joining a new group
+                reset_repeating_student($pdo, $uid);
+
                 $stmt = $pdo->prepare('INSERT INTO `groups` (name, description, created_by, is_active) VALUES (?, ?, ?, 1)');
                 $stmt->execute([$group_name, $group_desc ?: null, $uid]);
                 $group_id = (int) $pdo->lastInsertId();
 
-                // Add creator as group lead
                 $pdo->prepare('INSERT INTO `group_members` (group_id, student_id, role) VALUES (?, ?, "lead")')->execute([$group_id, $uid]);
 
-                // If the creator already has a project, attach it to this new group.
                 $stmt = $pdo->prepare('SELECT id FROM projects WHERE student_id = ? ORDER BY updated_at DESC LIMIT 1');
                 $stmt->execute([$uid]);
                 $creator_project_id = (int) ($stmt->fetchColumn() ?: 0);
@@ -116,14 +127,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && (($_POST['action']
                         $pdo->rollBack();
                         $error = 'Selected student is not available.';
                     } else {
-                        $stmt = $pdo->prepare('SELECT COUNT(*) FROM `group_members` WHERE student_id = ?');
+                        // Block only if student is in a non-archived active group
+                        $stmt = $pdo->prepare('
+                            SELECT COUNT(*) FROM `group_members` gm
+                            JOIN `groups` g ON g.id = gm.group_id
+                            LEFT JOIN projects p ON p.group_id = g.id
+                            WHERE gm.student_id = ?
+                              AND g.is_active = 1
+                              AND (p.status IS NULL OR p.status NOT IN ("archived"))
+                        ');
                         $stmt->execute([$member_id]);
-                        $already_in_group = (int) $stmt->fetchColumn() > 0;
+                        $already_in_active_group = (int) $stmt->fetchColumn() > 0;
 
-                        if ($already_in_group) {
+                        if ($already_in_active_group) {
                             $pdo->rollBack();
-                            $error = 'Selected student already belongs to a group.';
+                            $error = 'Selected student already belongs to an active group.';
                         } else {
+                            // Clean up stale archived memberships + reset repeat status before adding
+                            reset_repeating_student($pdo, $member_id);
+
                             $pdo->prepare('INSERT INTO `group_members` (group_id, student_id, role) VALUES (?, ?, "member")')->execute([(int) $current_group['id'], $member_id]);
 
                             // Ensure this group's shared project is linked so new members can see existing work.
@@ -188,7 +210,24 @@ if ($current_group) {
 
 $invite_candidates = [];
 if ($current_group && (int) $current_group['created_by'] === $uid && (int) $current_group['member_count'] < 5) {
-    $stmt = $pdo->prepare('SELECT u.id, u.full_name, u.email, u.reg_number FROM users u WHERE u.role = "student" AND u.is_active = 1 AND u.id <> ? AND u.id NOT IN (SELECT student_id FROM `group_members`) ORDER BY u.full_name');
+    // Exclude students already in a non-archived active group.
+    // Students whose only memberships are in archived groups are eligible (repeat students).
+    $stmt = $pdo->prepare('
+        SELECT u.id, u.full_name, u.email, u.reg_number, u.repeat_required
+        FROM users u
+        WHERE u.role = "student"
+          AND u.is_active = 1
+          AND u.id <> ?
+          AND u.id NOT IN (
+              SELECT gm.student_id
+              FROM `group_members` gm
+              JOIN `groups` g ON g.id = gm.group_id
+              LEFT JOIN projects p ON p.group_id = g.id
+              WHERE g.is_active = 1
+                AND (p.status IS NULL OR p.status NOT IN ("archived"))
+          )
+        ORDER BY u.repeat_required DESC, u.full_name
+    ');
     $stmt->execute([$uid]);
     $invite_candidates = $stmt->fetchAll();
 }

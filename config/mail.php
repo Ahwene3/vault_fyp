@@ -9,7 +9,7 @@ if (!defined('SITE_NAME')) {
 }
 
 if (!defined('MAILERSEND_SMTP_HOST')) {
-    define('MAILERSEND_SMTP_HOST', getenv('MAILERSEND_SMTP_HOST') ?: 'smtp.mailersend.net');
+    define('MAILERSEND_SMTP_HOST', getenv('MAILERSEND_SMTP_HOST') ?: 'smtp-relay.brevo.com');
 }
 
 if (!defined('MAILERSEND_SMTP_PORT')) {
@@ -17,11 +17,11 @@ if (!defined('MAILERSEND_SMTP_PORT')) {
 }
 
 if (!defined('MAILERSEND_SMTP_ENCRYPTION')) {
-    define('MAILERSEND_SMTP_ENCRYPTION', getenv('MAILERSEND_SMTP_ENCRYPTION') ?: 'tls'); // tls or ssl
+    define('MAILERSEND_SMTP_ENCRYPTION', getenv('MAILERSEND_SMTP_ENCRYPTION') ?: 'tls');
 }
 
 if (!defined('MAILERSEND_SMTP_USERNAME')) {
-    define('MAILERSEND_SMTP_USERNAME', getenv('MAILERSEND_SMTP_USERNAME') ?: '');
+    define('MAILERSEND_SMTP_USERNAME', getenv('MAILERSEND_SMTP_USERNAME') ?: 'aa3cc7001@smtp-brevo.com');
 }
 
 if (!defined('MAILERSEND_SMTP_PASSWORD')) {
@@ -29,7 +29,7 @@ if (!defined('MAILERSEND_SMTP_PASSWORD')) {
 }
 
 if (!defined('SITE_EMAIL')) {
-    define('SITE_EMAIL', getenv('MAIL_FROM_EMAIL') ?: 'noreply@example.com');
+    define('SITE_EMAIL', getenv('MAIL_FROM_EMAIL') ?: 'atakorahe57@gmail.com');
 }
 
 if (!defined('MAIL_FROM_NAME')) {

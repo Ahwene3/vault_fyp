@@ -266,6 +266,50 @@ function send_assessment_notification_email(string $email, string $student_name,
     return send_template_email($email, 'New Assessment Received', $title, $content, 'View Assessment', $cta_url);
 }
 
+function send_password_reset_email(string $email, string $name, string $reset_url): bool {
+    $safeName = htmlspecialchars(trim($name) ?: 'User', ENT_QUOTES, 'UTF-8');
+    $safeUrl  = htmlspecialchars($reset_url, ENT_QUOTES, 'UTF-8');
+
+    $subject = 'Reset your FYP Vault password';
+
+    $html  = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head>";
+    $html .= "<body style=\"margin:0;padding:0;background:#0b1120;font-family:Inter,Segoe UI,Arial,sans-serif;\">";
+    $html .= "<div style=\"max-width:600px;margin:32px auto;background:#0f172a;border-radius:20px;overflow:hidden;border:1px solid rgba(99,102,241,0.3);\">";
+
+    // Header
+    $html .= "<div style=\"padding:28px 32px 24px;background:linear-gradient(135deg,#1e293b 0%,#312e81 50%,#0e7490 100%);\">";
+    $html .= "<div style=\"display:inline-block;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,0.12);font-weight:700;letter-spacing:0.12em;color:#e2e8f0;font-size:14px;\">FYP VAULT</div>";
+    $html .= "<h1 style=\"margin:16px 0 6px;color:#f8fafc;font-size:22px;line-height:1.3;\">Password Reset Request</h1>";
+    $html .= "<p style=\"margin:0;color:#cbd5e1;font-size:14px;\">Someone requested a password reset for your account.</p>";
+    $html .= "</div>";
+
+    // Body
+    $html .= "<div style=\"padding:32px;\">";
+    $html .= "<p style=\"margin:0 0 16px;color:#e2e8f0;font-size:15px;\">Hello <strong>$safeName</strong>,</p>";
+    $html .= "<p style=\"margin:0 0 28px;color:#94a3b8;font-size:14px;line-height:1.7;\">Click the button below to set a new password. This link expires in <strong style=\"color:#e2e8f0;\">1 hour</strong>.</p>";
+
+    $html .= "<div style=\"text-align:center;margin:0 0 28px;\">";
+    $html .= "<a href=\"$safeUrl\" style=\"display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#6366f1,#06b6d4);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:15px;letter-spacing:0.02em;\">Reset My Password</a>";
+    $html .= "</div>";
+
+    $html .= "<p style=\"margin:0 0 10px;color:#64748b;font-size:12px;line-height:1.6;\">If the button doesn't work, copy and paste this link into your browser:</p>";
+    $html .= "<p style=\"margin:0 0 24px;word-break:break-all;\"><a href=\"$safeUrl\" style=\"color:#6366f1;font-size:12px;\">$safeUrl</a></p>";
+
+    $html .= "<div style=\"padding:16px;border-radius:10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);\">";
+    $html .= "<p style=\"margin:0;color:#fca5a5;font-size:12px;line-height:1.6;\"><strong>Didn't request this?</strong> You can safely ignore this email — your password will not change.</p>";
+    $html .= "</div>";
+    $html .= "</div>";
+
+    // Footer
+    $html .= "<div style=\"padding:20px 32px;border-top:1px solid rgba(148,163,184,0.1);text-align:center;\">";
+    $html .= "<p style=\"margin:0;color:#475569;font-size:12px;\">© 2026 FYP Vault — Final Year Project Vault & Collaboration Hub</p>";
+    $html .= "</div>";
+    $html .= "</div></body></html>";
+
+    $err = null;
+    return send_email($email, $subject, $html, SITE_EMAIL, $err);
+}
+
 function get_app_url(string $path = ''): string {
     $base_path = defined('BASE_PATH') ? BASE_PATH : '/vault';
     $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || ($_SERVER['SERVER_PORT'] ?? null) == 443) ? 'https' : 'http';

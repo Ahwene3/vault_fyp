@@ -48,7 +48,25 @@ $stmt = $pdo->prepare('SELECT email, full_name, role, department, reg_number, ph
 $stmt->execute([$uid]);
 $profile = $stmt->fetch();
 [$first_name, $last_name] = split_profile_name((string) ($profile['full_name'] ?? ''));
+$profile_role = (string) ($profile['role'] ?? $user['role'] ?? 'student');
+$is_student = $profile_role === 'student';
 $student_id_display = (string) ($profile['reg_number'] ?: $uid);
+$department_display = get_department_display_name($pdo, $profile['department'] ?? '');
+
+$role_label_map = [
+    'student'    => 'Student Portal',
+    'supervisor' => 'Supervisor Portal',
+    'hod'        => 'HOD Portal',
+    'admin'      => 'Admin Portal',
+];
+$role_badge_map = [
+    'student'    => ['bg-success', 'Active Student'],
+    'supervisor' => ['bg-primary', 'Supervisor'],
+    'hod'        => ['bg-warning text-dark', 'Head of Department'],
+    'admin'      => ['bg-danger', 'Administrator'],
+];
+$portal_label  = $role_label_map[$profile_role] ?? ucfirst($profile_role) . ' Portal';
+[$badge_class, $badge_text] = $role_badge_map[$profile_role] ?? ['bg-secondary', ucfirst($profile_role)];
 
 $pageTitle = 'Profile';
 require_once __DIR__ . '/includes/header.php';
@@ -56,9 +74,9 @@ require_once __DIR__ . '/includes/header.php';
 
 <section class="dashboard-hero mb-4 d-flex align-items-center justify-content-between">
     <div>
-        <div class="dashboard-hero__eyebrow">Student Portal</div>
+        <div class="dashboard-hero__eyebrow"><?= e($portal_label) ?></div>
         <h1 class="dashboard-hero__title mb-2">My Profile</h1>
-        <p class="dashboard-hero__copy mb-0">Update your student details and keep your vault identity current.</p>
+        <p class="dashboard-hero__copy mb-0">Update your details and keep your vault identity current.</p>
     </div>
     <div class="dashboard-hero__actions">
         <a href="#profile-form" class="btn dashboard-hero__btn">Save Changes</a>
@@ -71,9 +89,13 @@ require_once __DIR__ . '/includes/header.php';
         <div class="flex-grow-1">
             <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
                 <h2 class="h4 mb-0"><?= e($profile['full_name']) ?></h2>
-                <span class="badge bg-success student-badge-green">Active Student</span>
+                <span class="badge <?= e($badge_class) ?>"><?= e($badge_text) ?></span>
             </div>
-            <div class="text-muted">Student ID #<?= e($student_id_display) ?> · <?= e($profile['department'] ?: 'No department') ?></div>
+            <?php if ($is_student): ?>
+                <div class="text-muted">Student ID #<?= e($student_id_display) ?> · <?= e($department_display ?: 'No department') ?></div>
+            <?php else: ?>
+                <div class="text-muted"><?= e(ucfirst($profile_role)) ?> · <?= e($department_display ?: 'No department') ?></div>
+            <?php endif; ?>
             <div class="text-muted small"><?= e($profile['email']) ?></div>
         </div>
     </div>
@@ -95,6 +117,7 @@ require_once __DIR__ . '/includes/header.php';
                             <label class="form-label" for="last_name">Last Name</label>
                             <input type="text" class="form-control" id="last_name" name="last_name" value="<?= e($last_name) ?>">
                         </div>
+                        <?php if ($is_student): ?>
                         <div class="col-md-6">
                             <label class="form-label" for="student_id">Student ID</label>
                             <input type="text" class="form-control" id="student_id" value="<?= e($student_id_display) ?>" readonly>
@@ -103,13 +126,14 @@ require_once __DIR__ . '/includes/header.php';
                             <label class="form-label" for="index_number">Index Number</label>
                             <input type="text" class="form-control" id="index_number" value="<?= e($profile['reg_number'] ?? '—') ?>" readonly>
                         </div>
+                        <?php endif; ?>
                         <div class="col-md-6">
                             <label class="form-label" for="email">Email</label>
                             <input type="email" class="form-control" id="email" value="<?= e($profile['email']) ?>" readonly>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="department">Department</label>
-                            <input type="text" class="form-control" id="department" value="<?= e($profile['department'] ?? '—') ?>" readonly>
+                            <input type="text" class="form-control" id="department" value="<?= e($department_display ?: '—') ?>" readonly>
                         </div>
                         <div class="col-12">
                             <label class="form-label" for="phone">Phone</label>

@@ -38,7 +38,7 @@ function ensure_group_project_link(PDO $pdo, int $group_id): void {
 }
 
 function fetch_project_context(PDO $pdo, int $project_id): ?array {
-    $stmt = $pdo->prepare('SELECT p.id, p.title, p.student_id, p.supervisor_id, p.group_id, g.name AS group_name, su.full_name AS student_name, sp.full_name AS supervisor_name
+    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, p.student_id, p.supervisor_id, p.group_id, g.name AS group_name, su.full_name AS student_name, sp.full_name AS supervisor_name
         FROM projects p
         LEFT JOIN `groups` g ON g.id = p.group_id
         LEFT JOIN users su ON su.id = p.student_id
@@ -94,6 +94,10 @@ function can_access_project_messages(PDO $pdo, int $uid, string $role, int $proj
         return false;
     }
 
+    if (($project['status'] ?? '') === 'archived') {
+        return false;
+    }
+
     if ($role === 'student') {
         $participants = get_project_student_participants($pdo, $project);
         return in_array($uid, $participants, true);
@@ -119,14 +123,14 @@ if ($role === 'student') {
     }
 }
 
-// List conversations
+// List conversations (archived projects excluded)
 if ($role === 'student') {
     $stmt = $pdo->prepare('SELECT DISTINCT p.id, p.title, p.supervisor_id, u.full_name AS other_name, g.name AS group_name, p.updated_at
         FROM projects p
         LEFT JOIN users u ON p.supervisor_id = u.id
         LEFT JOIN `groups` g ON g.id = p.group_id
         LEFT JOIN `group_members` gm ON gm.group_id = p.group_id
-        WHERE p.supervisor_id IS NOT NULL AND (p.student_id = ? OR gm.student_id = ?)
+        WHERE p.supervisor_id IS NOT NULL AND p.status != "archived" AND (p.student_id = ? OR gm.student_id = ?)
         ORDER BY p.updated_at DESC');
     $stmt->execute([$uid, $uid]);
     $conversations = $stmt->fetchAll();
@@ -140,7 +144,7 @@ if ($role === 'student') {
         FROM projects p
         JOIN users u ON p.student_id = u.id
         LEFT JOIN `groups` g ON g.id = p.group_id
-        WHERE p.supervisor_id = ?
+        WHERE p.supervisor_id = ? AND p.status != "archived"
         ORDER BY p.updated_at DESC');
     $stmt->execute([$uid]);
     $conversations = $stmt->fetchAll();
@@ -153,6 +157,14 @@ $stmt = $pdo->prepare('SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND 
 $stmt->execute([$uid]);
 $unread_message_count = (int) $stmt->fetchColumn();
 $active_contacts = count($conversations);
+
+$project_is_archived = false;
+if ($project_id) {
+    $pre_check = fetch_project_context($pdo, $project_id);
+    if ($pre_check && ($pre_check['status'] ?? '') === 'archived') {
+        $project_is_archived = true;
+    }
+}
 
 if ($project_id && !can_access_project_messages($pdo, $uid, $role, $project_id)) {
     $project_id = null;
@@ -406,6 +418,14 @@ require_once __DIR__ . '/includes/header.php';
                             </small>
                         <?php endif; ?>
                     </form>
+                </div>
+            </div>
+        <?php elseif ($project_is_archived): ?>
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <i class="bi bi-archive-fill mb-3 d-block" style="font-size: 2.5rem; color: var(--hod-accent, #4f46e5);"></i>
+                    <h5 class="mb-2">Project Archived</h5>
+                    <p class="text-muted mb-0">This project has been archived. Messaging is no longer available for archived projects.</p>
                 </div>
             </div>
         <?php else: ?>

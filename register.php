@@ -33,6 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Please enter your name and email.';
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $error = 'Please enter a valid email address.';
+        } elseif (!str_ends_with(strtolower($email), '@st.rmu.edu.gh')) {
+            $error = 'Only RMU student emails are accepted. Your email must end with @st.rmu.edu.gh.';
         } elseif ($department === '') {
             $error = 'Please select your department.';
         } elseif ($level === '') {
@@ -51,36 +53,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($stmt->fetch()) {
                 $error = 'Email already registered.';
             } else {
-                $requires_otp = should_require_otp_for_role('student');
-                $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, reg_number, is_verified, verified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-                $stmt->execute([
-                    $email,
-                    $hash,
-                    $full_name,
-                    $first_name,
-                    $last_name,
-                    $level ?: null,
-                    'student',
-                    $department ?: null,
-                    $index_number ?: null,
-                    $requires_otp ? 0 : 1,
-                    $requires_otp ? null : date('Y-m-d H:i:s')
-                ]);
+                $otp_error = null;
+                $_SESSION['pending_registration'] = [
+                    'email'         => $email,
+                    'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                    'full_name'     => $full_name,
+                    'first_name'    => $first_name,
+                    'last_name'     => $last_name,
+                    'level'         => $level ?: null,
+                    'department'    => $department ?: null,
+                    'index_number'  => $index_number ?: null,
+                ];
+                $_SESSION['pending_verification_email'] = $email;
 
-                if ($requires_otp) {
-                    $_SESSION['pending_verification_email'] = $email;
-                    $recipient_name = $full_name ?: $first_name;
-                    $otp_error = null;
-                    if (issue_and_send_otp($pdo, $email, (string) $recipient_name, $otp_error)) {
-                        flash('success', 'Registration successful. We sent a verification code to your email.');
-                    } else {
-                        flash('error', 'Account created, but OTP email failed to send. ' . ($otp_error ?: 'Please try resending OTP.'));
-                    }
+                if (issue_and_send_otp($pdo, $email, (string) ($full_name ?: $first_name), $otp_error)) {
+                    flash('success', 'A 6-digit verification code has been sent to your email. Enter it below to complete registration.');
                     redirect(base_url('verify_otp.php'));
                 } else {
-                    flash('success', 'Registration successful. You can now sign in.');
-                    redirect(base_url('index.php'));
+                    unset($_SESSION['pending_registration'], $_SESSION['pending_verification_email']);
+                    $error = 'Failed to send verification email: ' . ($otp_error ?: 'Unknown error. Please try again.');
                 }
             }
         }
@@ -470,6 +461,7 @@ $pageTitle = 'Register';
                                 placeholder="your.email@st.rmu.edu.gh"
                                 class="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-300/70 focus:ring-4 focus:ring-cyan-400/15"
                             >
+                            <p id="emailHint" class="mt-2 text-xs text-slate-500"></p>
                         </div>
 
                         <div class="grid gap-5 md:grid-cols-2">
@@ -588,10 +580,15 @@ $pageTitle = 'Register';
 
                         <button
                             type="submit"
-                            class="group inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 px-5 py-3.5 text-sm font-bold text-white shadow-[0_18px_40px_rgba(99,102,241,0.35)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_50px_rgba(34,211,238,0.28)]"
+                            id="submitBtn"
+                            class="group inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 px-5 py-3.5 text-sm font-bold text-white shadow-[0_18px_40px_rgba(99,102,241,0.35)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_50px_rgba(34,211,238,0.28)] disabled:opacity-60 disabled:cursor-not-allowed disabled:translate-y-0"
                         >
-                            Create Account
-                            <i class="bi bi-arrow-right-short text-xl transition group-hover:translate-x-0.5"></i>
+                            <svg id="submitSpinner" class="hidden h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <span id="submitLabel">Create Account</span>
+                            <i id="submitArrow" class="bi bi-arrow-right-short text-xl transition group-hover:translate-x-0.5"></i>
                         </button>
                     </form>
 
@@ -615,6 +612,11 @@ $pageTitle = 'Register';
         const indexInput = document.getElementById('index_number');
         const indexHint = document.getElementById('indexHint');
         const form = document.getElementById('registerForm');
+        const emailInput = document.getElementById('email');
+        const submitBtn = document.getElementById('submitBtn');
+        const submitSpinner = document.getElementById('submitSpinner');
+        const submitLabel = document.getElementById('submitLabel');
+        const submitArrow = document.getElementById('submitArrow');
 
         function updateToggle(btn, input) {
             const hidden = input.type === 'password';
@@ -691,16 +693,50 @@ $pageTitle = 'Register';
             }
         }
 
+        // Email domain validation
+        let emailHint = document.getElementById('emailHint');
+        function validateEmailDomain() {
+            const val = emailInput.value.trim().toLowerCase();
+            if (!val) { emailHint.textContent = ''; return; }
+            if (val.endsWith('@st.rmu.edu.gh')) {
+                emailHint.textContent = 'Valid RMU student email.';
+                emailHint.className = 'mt-2 text-xs text-emerald-300';
+            } else if (val.includes('@')) {
+                emailHint.textContent = 'Must end with @st.rmu.edu.gh';
+                emailHint.className = 'mt-2 text-xs text-red-300';
+            } else {
+                emailHint.textContent = '';
+            }
+        }
+
+        function showSpinner() {
+            submitBtn.disabled = true;
+            submitSpinner.classList.remove('hidden');
+            submitLabel.textContent = 'Sending OTP…';
+            submitArrow.classList.add('hidden');
+        }
+
         togglePassword.addEventListener('click', () => updateToggle(togglePassword, passwordInput));
         toggleConfirm.addEventListener('click', () => updateToggle(toggleConfirm, confirmInput));
         passwordInput.addEventListener('input', () => { scorePassword(passwordInput.value); updateMatch(); });
         confirmInput.addEventListener('input', updateMatch);
         indexInput.addEventListener('input', validateIndex);
+        emailInput.addEventListener('input', validateEmailDomain);
 
         form.addEventListener('submit', (event) => {
             scorePassword(passwordInput.value);
             updateMatch();
             validateIndex();
+            validateEmailDomain();
+
+            const email = emailInput.value.trim().toLowerCase();
+            if (!email.endsWith('@st.rmu.edu.gh')) {
+                event.preventDefault();
+                emailInput.focus();
+                emailHint.textContent = 'Must end with @st.rmu.edu.gh';
+                emailHint.className = 'mt-2 text-xs text-red-300';
+                return;
+            }
 
             const strongEnough = scorePassword(passwordInput.value) >= 4;
             if (passwordInput.value !== confirmInput.value) {
@@ -716,12 +752,16 @@ $pageTitle = 'Register';
                 passwordInput.focus();
                 strengthLabel.textContent = 'Use a stronger password';
                 strengthLabel.className = 'text-sm font-semibold text-red-300';
+                return;
             }
+
+            showSpinner();
         });
 
         scorePassword(passwordInput.value);
         updateMatch();
         validateIndex();
+        validateEmailDomain();
     </script>
 </body>
 </html>

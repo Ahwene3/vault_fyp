@@ -209,7 +209,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
             $stmt = $pdo->prepare('SELECT id FROM projects WHERE id = ? AND status = "completed"');
             $stmt->execute([$project_id]);
             if ($stmt->fetch()) {
-                $pdo->prepare('UPDATE projects SET status = "archived" WHERE id = ?')->execute([$project_id]);
+                // Unlink supervisor and mark archived
+                $pdo->prepare('UPDATE projects SET status = "archived", supervisor_id = NULL WHERE id = ?')->execute([$project_id]);
                 $pdo->prepare('INSERT INTO archive_metadata (project_id, archived_by) VALUES (?, ?) ON DUPLICATE KEY UPDATE archived_by = VALUES(archived_by), archived_at = NOW()')->execute([$project_id, $uid]);
                 // Set all members to completed via old path (no contribution status)
                 foreach (hod_get_member_ids($pdo, $scoped_project) as $mid) {
@@ -234,7 +235,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     }
                 }
 
-                $pdo->prepare('UPDATE projects SET status = "archived" WHERE id = ?')->execute([$project_id]);
+                // Unlink supervisor and mark archived
+                $pdo->prepare('UPDATE projects SET status = "archived", supervisor_id = NULL WHERE id = ?')->execute([$project_id]);
                 $pdo->prepare('INSERT INTO archive_metadata (project_id, archived_by) VALUES (?, ?) ON DUPLICATE KEY UPDATE archived_by = VALUES(archived_by), archived_at = NOW()')->execute([$project_id, $uid]);
 
                 foreach ($member_ids as $mid) {

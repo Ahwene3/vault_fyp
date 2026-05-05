@@ -12,30 +12,26 @@ ensure_otp_schema($pdo);
 $pending_email = trim((string) ($_SESSION['pending_verification_email'] ?? ''));
 if ($pending_email === '') {
     flash('error', 'No pending verification found. Please register or sign in.');
-    redirect(base_url('index.php'));
+    redirect(base_url('register.php'));
 }
 
-$user = get_unverified_user_by_email($pdo, $pending_email);
-if (!$user) {
-    unset($_SESSION['pending_verification_email']);
-    flash('error', 'Account not found for OTP verification.');
-    redirect(base_url('index.php'));
-}
+// Support both the new session-only flow (user not yet in DB) and the legacy flow.
+$pending_reg = $_SESSION['pending_registration'] ?? null;
+$session_flow = $pending_reg && (($pending_reg['email'] ?? '') === $pending_email);
 
-if (!should_require_otp_for_role((string) ($user['role'] ?? ''))) {
-    if ((int) ($user['is_verified'] ?? 1) !== 1) {
-        mark_email_verified($pdo, $pending_email);
+if (!$session_flow) {
+    // Legacy: user already in DB — check it exists and isn't already verified.
+    $user = get_unverified_user_by_email($pdo, $pending_email);
+    if (!$user) {
+        unset($_SESSION['pending_verification_email']);
+        flash('error', 'Account not found for OTP verification.');
+        redirect(base_url('index.php'));
     }
-    delete_otp_for_email($pdo, $pending_email);
-    unset($_SESSION['pending_verification_email']);
-    flash('success', 'OTP verification is not required for this account. Please sign in.');
-    redirect(base_url('index.php'));
-}
-
-if ((int) ($user['is_verified'] ?? 1) === 1) {
-    unset($_SESSION['pending_verification_email']);
-    flash('success', 'Your email is already verified. Please sign in.');
-    redirect(base_url('index.php'));
+    if ((int) ($user['is_verified'] ?? 1) === 1) {
+        unset($_SESSION['pending_verification_email']);
+        flash('success', 'Your email is already verified. Please sign in.');
+        redirect(base_url('index.php'));
+    }
 }
 
 $error = '';
@@ -51,13 +47,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!verify_otp_code($pdo, $pending_email, $otp, $verify_error)) {
                 $error = $verify_error ?: 'Unable to verify OTP.';
             } else {
-                if (!mark_email_verified($pdo, $pending_email)) {
-                    $error = 'Unable to update verification status. Please try again.';
-                } else {
+                if ($session_flow) {
+                    // Insert user into DB only now that OTP is confirmed.
+                    $reg = $_SESSION['pending_registration'];
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, reg_number, is_verified, verified_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())'
+                    );
+                    $stmt->execute([
+                        $reg['email'],
+                        $reg['password_hash'],
+                        $reg['full_name'],
+                        $reg['first_name'],
+                        $reg['last_name'],
+                        $reg['level'],
+                        'student',
+                        $reg['department'],
+                        $reg['index_number'],
+                    ]);
                     delete_otp_for_email($pdo, $pending_email);
-                    unset($_SESSION['pending_verification_email']);
-                    flash('success', 'Email verified successfully. You can now sign in.');
+                    unset($_SESSION['pending_verification_email'], $_SESSION['pending_registration']);
+                    flash('success', 'Email verified! Your account is ready. You can now sign in.');
                     redirect(base_url('index.php'));
+                } else {
+                    if (!mark_email_verified($pdo, $pending_email)) {
+                        $error = 'Unable to update verification status. Please try again.';
+                    } else {
+                        delete_otp_for_email($pdo, $pending_email);
+                        unset($_SESSION['pending_verification_email']);
+                        flash('success', 'Email verified successfully. You can now sign in.');
+                        redirect(base_url('index.php'));
+                    }
                 }
             }
         }
@@ -111,7 +131,7 @@ $flash_error = flash('error');
                 <div class="mb-4 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"><?= e($error) ?></div>
             <?php endif; ?>
 
-            <form method="post" class="space-y-4">
+            <form method="post" class="space-y-4" id="verifyForm">
                 <?= csrf_field() ?>
                 <div>
                     <label for="otp" class="mb-2 block text-sm font-medium text-slate-200">OTP Code</label>
@@ -129,19 +149,29 @@ $flash_error = flash('error');
                 </div>
                 <button
                     type="submit"
-                    class="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 px-5 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5"
+                    id="verifyBtn"
+                    class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 px-5 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                    Verify OTP
+                    <svg id="verifySpinner" class="hidden h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    <span id="verifyLabel">Verify OTP</span>
                 </button>
             </form>
 
-            <form method="post" action="<?= base_url('resend_otp.php') ?>" class="mt-4">
+            <form method="post" action="<?= base_url('resend_otp.php') ?>" class="mt-4" id="resendForm">
                 <?= csrf_field() ?>
                 <button
                     type="submit"
-                    class="w-full rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+                    id="resendBtn"
+                    class="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-5 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                    Resend OTP
+                    <svg id="resendSpinner" class="hidden h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    <span id="resendLabel">Resend OTP</span>
                 </button>
             </form>
 
@@ -155,6 +185,20 @@ $flash_error = flash('error');
         const otpInput = document.getElementById('otp');
         otpInput.addEventListener('input', () => {
             otpInput.value = otpInput.value.replace(/\D+/g, '').slice(0, 6);
+        });
+
+        document.getElementById('verifyForm').addEventListener('submit', () => {
+            const btn = document.getElementById('verifyBtn');
+            btn.disabled = true;
+            document.getElementById('verifySpinner').classList.remove('hidden');
+            document.getElementById('verifyLabel').textContent = 'Verifying…';
+        });
+
+        document.getElementById('resendForm').addEventListener('submit', () => {
+            const btn = document.getElementById('resendBtn');
+            btn.disabled = true;
+            document.getElementById('resendSpinner').classList.remove('hidden');
+            document.getElementById('resendLabel').textContent = 'Sending…';
         });
     </script>
 </body>

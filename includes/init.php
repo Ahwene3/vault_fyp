@@ -305,6 +305,50 @@ function ensure_project_contribution_status_table(PDO $pdo): void {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
 }
 
+/**
+ * Prepare a repeating student to join a new group:
+ * - Remove them from any archived group memberships
+ * - Delete their stale contribution_status records
+ * - Reset student_project_status → "active" and repeat_required → 0
+ *
+ * Must be called inside an open transaction.
+ */
+function reset_repeating_student(PDO $pdo, int $student_id): void {
+    // Find all archived group memberships for this student
+    $stmt = $pdo->prepare('
+        SELECT gm.group_id
+        FROM `group_members` gm
+        JOIN `groups` g ON g.id = gm.group_id
+        LEFT JOIN projects p ON p.group_id = g.id
+        WHERE gm.student_id = ?
+          AND (p.status = "archived" OR p.id IS NULL)
+    ');
+    $stmt->execute([$student_id]);
+    $archived_group_ids = array_column($stmt->fetchAll(), 'group_id');
+
+    if (!empty($archived_group_ids)) {
+        // Remove stale group memberships
+        $ph = implode(',', array_fill(0, count($archived_group_ids), '?'));
+        $pdo->prepare("DELETE FROM `group_members` WHERE student_id = ? AND group_id IN ($ph)")
+            ->execute(array_merge([$student_id], $archived_group_ids));
+
+        // Remove stale contribution records for those archived projects
+        $proj_stmt = $pdo->prepare("SELECT id FROM projects WHERE group_id IN ($ph) AND status = 'archived'");
+        $proj_stmt->execute($archived_group_ids);
+        $archived_project_ids = array_column($proj_stmt->fetchAll(), 'id');
+
+        if (!empty($archived_project_ids)) {
+            $pph = implode(',', array_fill(0, count($archived_project_ids), '?'));
+            $pdo->prepare("DELETE FROM project_contribution_status WHERE student_id = ? AND project_id IN ($pph)")
+                ->execute(array_merge([$student_id], $archived_project_ids));
+        }
+    }
+
+    // Reset the student's tracking columns for the new cycle
+    $pdo->prepare('UPDATE users SET student_project_status = "active", repeat_required = 0 WHERE id = ? AND repeat_required = 1')
+        ->execute([$student_id]);
+}
+
 function has_other_active_hod_in_department(PDO $pdo, string $department, int $excludeUserId = 0): bool {
     $info = resolve_department_info($pdo, $department);
     if (empty($info['variants'])) {
