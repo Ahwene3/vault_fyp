@@ -141,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     }
 }
 
-// Add user (supervisor/HOD - students register themselves)
+// Add user (supervisor/HOD/admin/student)
 $add_error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] ?? '') === 'add_user') {
     $email = trim($_POST['email'] ?? '');
@@ -150,10 +150,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
     $department = trim($_POST['department'] ?? '');
     $department_info = resolve_department_info($pdo, $department);
     $password = $_POST['password'] ?? '';
+    $reg_number = trim($_POST['reg_number'] ?? '');
+    $level = trim($_POST['level'] ?? '');
+
     if (!$email || !$full_name || !$password) {
         $add_error = 'Fill all fields.';
-    } elseif (!in_array($role, ['supervisor', 'hod', 'admin'], true)) {
+    } elseif (!in_array($role, ['student', 'supervisor', 'hod', 'admin'], true)) {
         $add_error = 'Invalid role.';
+    } elseif ($role === 'student' && !$reg_number) {
+        $add_error = 'Index number is required for students.';
     } elseif (in_array($role, ['supervisor', 'hod'], true) && empty($department_info['variants'])) {
         $add_error = 'A valid department is required for supervisors and HODs.';
     } elseif ($role === 'hod' && has_other_active_hod_in_department($pdo, $department)) {
@@ -164,14 +169,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
         if ($stmt->fetch()) {
             $add_error = 'Email already in use.';
         } else {
-            $hash = password_hash($password, PASSWORD_DEFAULT);
-            $department_to_store = null;
-            if ($department !== '') {
-                $department_to_store = $department_info['id'] !== null ? (string) $department_info['id'] : $department;
+            $stmt2 = $pdo->prepare('SELECT id FROM users WHERE reg_number = ?');
+            $stmt2->execute([$reg_number]);
+            if ($role === 'student' && $stmt2->fetch()) {
+                $add_error = 'An account with this index number already exists.';
+            } else {
+                $hash = password_hash($password, PASSWORD_DEFAULT);
+                $department_to_store = null;
+                if ($department !== '') {
+                    $department_to_store = $department_info['id'] !== null ? (string) $department_info['id'] : $department;
+                }
+                $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department, reg_number, level) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$email, $hash, $full_name, $role, $department_to_store, $reg_number ?: null, $level ?: null]);
+                flash('success', 'User added.');
+                redirect(base_url('admin/users.php'));
             }
-            $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department) VALUES (?, ?, ?, ?, ?)')->execute([$email, $hash, $full_name, $role, $department_to_store]);
-            flash('success', 'User added.');
-            redirect(base_url('admin/users.php'));
         }
     }
 }
@@ -258,21 +270,73 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 
 <div class="card mb-4">
-    <div class="card-header">Add User (Supervisor / HOD / Admin)</div>
+    <div class="card-header">Add User</div>
     <div class="card-body">
-        <form method="post" class="row g-3">
+        <?php if ($add_error): ?><div class="alert alert-danger"><?= e($add_error) ?></div><?php endif; ?>
+        <form method="post" class="row g-3" id="addUserForm">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="add_user">
-            <div class="col-md-3"><label class="form-label">Full Name</label><input type="text" name="full_name" class="form-control" required></div>
-            <div class="col-md-3"><label class="form-label">Email</label><input type="email" name="email" class="form-control" required></div>
-            <div class="col-md-2"><label class="form-label">Password</label><input type="password" name="password" class="form-control" required minlength="8"></div>
-            <div class="col-md-2"><label class="form-label">Role</label><select name="role" class="form-select"><option value="supervisor">Supervisor</option><option value="hod">HOD</option><option value="admin">Admin</option></select></div>
-            <div class="col-md-2"><label class="form-label">Department</label><select name="department" class="form-select"><option value="">Select...</option><?php foreach ($departments as $d): ?><option value="<?= (int) $d['id'] ?>"><?= e($d['name']) ?></option><?php endforeach; ?></select></div>
-            <div class="col-12"><button type="submit" class="btn btn-primary">Add</button></div>
+            <div class="col-md-3">
+                <label class="form-label">Full Name</label>
+                <input type="text" name="full_name" class="form-control" required value="<?= e($_POST['full_name'] ?? '') ?>">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-control" required value="<?= e($_POST['email'] ?? '') ?>">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Password</label>
+                <input type="password" name="password" class="form-control" required minlength="8">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Role</label>
+                <select name="role" class="form-select" id="addRoleSelect" onchange="toggleAddUserFields()">
+                    <option value="supervisor" <?= ($_POST['role'] ?? '') === 'supervisor' ? 'selected' : '' ?>>Supervisor</option>
+                    <option value="hod" <?= ($_POST['role'] ?? '') === 'hod' ? 'selected' : '' ?>>HOD</option>
+                    <option value="admin" <?= ($_POST['role'] ?? '') === 'admin' ? 'selected' : '' ?>>Admin</option>
+                    <option value="student" <?= ($_POST['role'] ?? '') === 'student' ? 'selected' : '' ?>>Student</option>
+                </select>
+            </div>
+            <div class="col-md-2" id="addDeptField">
+                <label class="form-label">Department</label>
+                <select name="department" class="form-select">
+                    <option value="">Select...</option>
+                    <?php foreach ($departments as $d): ?>
+                        <option value="<?= (int) $d['id'] ?>" <?= ($_POST['department'] ?? '') == $d['id'] ? 'selected' : '' ?>><?= e($d['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <!-- Student-only fields -->
+            <div class="col-md-2" id="addIndexField" style="display:none;">
+                <label class="form-label">Index Number <span class="text-danger">*</span></label>
+                <input type="text" name="reg_number" class="form-control" placeholder="e.g. CS/2021/001" value="<?= e($_POST['reg_number'] ?? '') ?>">
+            </div>
+            <div class="col-md-2" id="addLevelField" style="display:none;">
+                <label class="form-label">Level / Year</label>
+                <select name="level" class="form-select">
+                    <option value="">Select...</option>
+                    <option value="100" <?= ($_POST['level'] ?? '') === '100' ? 'selected' : '' ?>>Level 100</option>
+                    <option value="200" <?= ($_POST['level'] ?? '') === '200' ? 'selected' : '' ?>>Level 200</option>
+                    <option value="300" <?= ($_POST['level'] ?? '') === '300' ? 'selected' : '' ?>>Level 300</option>
+                    <option value="400" <?= ($_POST['level'] ?? '') === '400' ? 'selected' : '' ?>>Level 400</option>
+                </select>
+            </div>
+            <div class="col-12"><button type="submit" class="btn btn-primary">Add User</button></div>
         </form>
-        <?php if ($add_error): ?><p class="text-danger mt-2 mb-0"><?= e($add_error) ?></p><?php endif; ?>
     </div>
 </div>
+<script>
+function toggleAddUserFields() {
+    var role = document.getElementById('addRoleSelect').value;
+    var isStudent = role === 'student';
+    document.getElementById('addIndexField').style.display = isStudent ? '' : 'none';
+    document.getElementById('addLevelField').style.display = isStudent ? '' : 'none';
+    document.getElementById('addDeptField').style.display = (role === 'supervisor' || role === 'hod') ? '' : 'none';
+    document.querySelector('[name="reg_number"]').required = isStudent;
+}
+// Apply on page load in case of POST error repopulation
+toggleAddUserFields();
+</script>
 
 <div class="card mb-4">
     <div class="card-header">Department HOD Coverage</div>

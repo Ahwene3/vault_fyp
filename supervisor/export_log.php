@@ -10,7 +10,7 @@ $pdo = getPDO();
 ensure_supervisor_logsheets_table($pdo);
 $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
 
-$stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.reg_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND p.supervisor_id = ?');
+$stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.reg_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND (p.supervisor_id = ? OR p.status = "archived")');
 $stmt->execute([$pid, $uid]);
 $project = $stmt->fetch();
 if (!$project) {
@@ -18,8 +18,25 @@ if (!$project) {
     redirect(base_url('supervisor/students.php'));
 }
 
-// Fetch log sheets
-$stmt = $pdo->prepare('SELECT * FROM supervisor_logsheets WHERE project_id = ? ORDER BY meeting_date DESC');
+// Fetch all group members (for group projects)
+$group_members = [];
+if (!empty($project['group_id'])) {
+    $stmt = $pdo->prepare('SELECT u.full_name, u.reg_number, u.email, gm.role AS group_role FROM `group_members` gm JOIN users u ON u.id = gm.student_id WHERE gm.group_id = ? ORDER BY CASE WHEN gm.role = "lead" THEN 0 ELSE 1 END, u.full_name');
+    $stmt->execute([(int) $project['group_id']]);
+    $group_members = $stmt->fetchAll();
+}
+// Ensure project owner is always included
+if (empty($group_members)) {
+    $group_members = [[
+        'full_name'  => $project['student_name'],
+        'reg_number' => $project['reg_number'],
+        'email'      => $project['email'],
+        'group_role' => 'lead',
+    ]];
+}
+
+// Fetch logbook entries (student entries + supervisor feedback)
+$stmt = $pdo->prepare('SELECT le.entry_date, le.title, le.content, le.supervisor_approved, le.supervisor_comment, le.created_at, u.full_name AS author_name FROM logbook_entries le JOIN users u ON u.id = le.created_by WHERE le.project_id = ? ORDER BY le.entry_date ASC, le.created_at ASC');
 $stmt->execute([$pid]);
 $logsheets = $stmt->fetchAll();
 
@@ -72,32 +89,48 @@ if ($format === 'pdf') {
     
     <div class="meta">
         <p><strong>Project:</strong> <?= e($project['title']) ?></p>
-        <p><strong>Student:</strong> <?= e($project['student_name']) ?> (<?= e($project['reg_number'] ?? 'N/A') ?>)</p>
+        <p><strong>Student(s):</strong>
+            <?php foreach ($group_members as $i => $m): ?>
+                <?= e($m['full_name']) ?> (<?= e($m['reg_number'] ?? 'N/A') ?>)<?= $m['group_role'] === 'lead' ? ' <em>[Lead]</em>' : '' ?><?= $i < count($group_members) - 1 ? ', ' : '' ?>
+            <?php endforeach; ?>
+        </p>
         <p><strong>Supervisor:</strong> <?= e($_SESSION['user']['full_name'] ?? 'Unknown') ?></p>
         <p><strong>Status:</strong> <?= e($project['status']) ?></p>
         <p><strong>Report Generated:</strong> <?= date('M j, Y H:i') ?></p>
     </div>
     
-    <!-- Log Sheets Section -->
+    <!-- Logbook Section -->
     <div class="section">
-        <h2>Supervisor Log Sheets</h2>
+        <h2>Logbook Entries</h2>
         <?php if (empty($logsheets)): ?>
-            <p><em>No log sheet entries recorded.</em></p>
+            <p><em>No logbook entries recorded.</em></p>
         <?php else: ?>
-            <?php foreach ($logsheets as $log): ?>
+            <?php foreach ($logsheets as $i => $log):
+                $approved = $log['supervisor_approved'];
+                $status_label = $approved === null ? 'Pending' : ($approved ? 'Approved' : 'Flagged');
+                $status_color = $approved === null ? '#856404' : ($approved ? '#155724' : '#721c24');
+                $status_bg    = $approved === null ? '#fff3cd' : ($approved ? '#d4edda' : '#f8d7da');
+            ?>
                 <div class="log-entry">
-                    <p><strong>Meeting Date:</strong> <?= e(date('M j, Y', strtotime($log['meeting_date']))) ?></p>
-                    <p><strong>Attendees:</strong> <?= e($log['student_attendees']) ?></p>
-                    <p><strong>Topics Discussed:</strong></p>
-                    <p><?= nl2br(e($log['topics_discussed'])) ?></p>
-                    <?php if ($log['action_points']): ?>
-                        <p><strong>Action Points:</strong></p>
-                        <p><?= nl2br(e($log['action_points'])) ?></p>
+                    <p style="margin:0 0 4px;">
+                        <strong>#<?= $i + 1 ?> — <?= e($log['title']) ?></strong>
+                        &nbsp;
+                        <span style="background:<?= $status_bg ?>;color:<?= $status_color ?>;padding:2px 8px;border-radius:4px;font-size:0.85em;"><?= $status_label ?></span>
+                    </p>
+                    <p style="margin:0 0 6px;font-size:0.88em;color:#555;">
+                        <strong>Date:</strong> <?= e(date('M j, Y', strtotime($log['entry_date']))) ?>
+                        &nbsp;|&nbsp;
+                        <strong>By:</strong> <?= e($log['author_name']) ?>
+                    </p>
+                    <p><strong>Entry:</strong></p>
+                    <p style="white-space:pre-wrap;"><?= nl2br(e($log['content'])) ?></p>
+                    <?php if (!empty($log['supervisor_comment'])): ?>
+                        <div style="margin-top:8px;padding:8px;background:#e8f4fd;border-left:3px solid #0069d9;">
+                            <strong>Supervisor Feedback:</strong>
+                            <p style="margin:4px 0 0;"><?= nl2br(e($log['supervisor_comment'])) ?></p>
+                        </div>
                     <?php endif; ?>
-                    <?php if ($log['next_meeting_date']): ?>
-                        <p><strong>Next Meeting:</strong> <?= e(date('M j, Y', strtotime($log['next_meeting_date']))) ?></p>
-                    <?php endif; ?>
-                    <p><small style="color: #666;">Recorded: <?= e(date('M j, Y H:i', strtotime($log['confirmed_at']))) ?></small></p>
+                    <p style="margin:6px 0 0;"><small style="color:#666;">Submitted: <?= e(date('M j, Y H:i', strtotime($log['created_at']))) ?></small></p>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
@@ -121,9 +154,18 @@ if ($format === 'pdf') {
                 </thead>
                 <tbody>
                     <?php foreach ($documents as $doc): ?>
+                        <?php
+                            $dtype = $doc['document_type'] ?? '';
+                            $dtype_label = match($dtype) {
+                                'proposal', 'documentation' => 'Documentation',
+                                'report'  => 'Report',
+                                'zip'     => 'Zipped Project',
+                                default   => ucfirst($dtype) ?: '—',
+                            };
+                        ?>
                         <tr>
                             <td><?= e($doc['file_name']) ?></td>
-                            <td><?= e($doc['document_type']) ?></td>
+                            <td><?= e($dtype_label) ?></td>
                             <td><?= e(date('M j, Y H:i', strtotime($doc['uploaded_at']))) ?></td>
                             <td>v<?= $doc['version_number'] ?? $doc['version'] ?></td>
                             <td><?= number_format($doc['file_size'] / 1024, 2) ?> KB</td>

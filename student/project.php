@@ -93,6 +93,9 @@ if (!$project && !$group_id) {
     $project = $stmt->fetch();
 }
 
+ensure_project_keywords_column($pdo);
+ensure_project_milestones_table($pdo);
+
 $is_archived = !empty($project) && ($project['status'] ?? '') === 'archived';
 $error = '';
 $success = '';
@@ -106,6 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     $action = $_POST['action'] ?? '';
     $title = trim($_POST['title'] ?? '');
     $description = trim($_POST['description'] ?? '');
+    $keywords = trim($_POST['keywords'] ?? '');
 
     if ($action === 'submit_topic') {
         if (strlen($title) < 10) {
@@ -113,23 +117,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
         } else {
             if ($project && in_array($project['status'], ['draft', 'rejected'], true)) {
                 if ($group_id && (int) ($project['group_id'] ?? 0) === $group_id) {
-                    $stmt = $pdo->prepare('UPDATE projects SET title = ?, description = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND group_id = ?');
-                    $stmt->execute([$title, $description ?: null, $project['id'], $group_id]);
+                    $stmt = $pdo->prepare('UPDATE projects SET title = ?, description = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND group_id = ?');
+                    $stmt->execute([$title, $description ?: null, $keywords ?: null, $project['id'], $group_id]);
                 } else {
-                    $stmt = $pdo->prepare('UPDATE projects SET title = ?, description = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND student_id = ?');
-                    $stmt->execute([$title, $description ?: null, $project['id'], $uid]);
+                    $stmt = $pdo->prepare('UPDATE projects SET title = ?, description = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND student_id = ?');
+                    $stmt->execute([$title, $description ?: null, $keywords ?: null, $project['id'], $uid]);
                 }
             } else {
                 if ($group_id) {
-                    // Use group lead as project owner for group projects
                     $stmt = $pdo->prepare('SELECT student_id FROM `group_members` WHERE group_id = ? ORDER BY CASE WHEN role = "lead" THEN 0 ELSE 1 END, id ASC LIMIT 1');
                     $stmt->execute([$group_id]);
                     $group_owner = (int) ($stmt->fetchColumn() ?: $uid);
-                    $stmt = $pdo->prepare('INSERT INTO projects (student_id, group_id, title, description, status, submitted_at) VALUES (?, ?, ?, ?, "submitted", NOW())');
-                    $stmt->execute([$group_owner, $group_id, $title, $description ?: null]);
+                    $stmt = $pdo->prepare('INSERT INTO projects (student_id, group_id, title, description, keywords, status, submitted_at) VALUES (?, ?, ?, ?, ?, "submitted", NOW())');
+                    $stmt->execute([$group_owner, $group_id, $title, $description ?: null, $keywords ?: null]);
                 } else {
-                    $stmt = $pdo->prepare('INSERT INTO projects (student_id, title, description, status, submitted_at) VALUES (?, ?, ?, "submitted", NOW())');
-                    $stmt->execute([$uid, $title, $description ?: null]);
+                    $stmt = $pdo->prepare('INSERT INTO projects (student_id, title, description, keywords, status, submitted_at) VALUES (?, ?, ?, ?, "submitted", NOW())');
+                    $stmt->execute([$uid, $title, $description ?: null, $keywords ?: null]);
                 }
             }
             flash('success', 'Project topic submitted for approval.');
@@ -180,8 +183,10 @@ if ($project && !$is_archived && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_v
     } elseif (!empty($_FILES['doc_file']['name'])) {
         $file = $_FILES['doc_file'];
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-        if (!in_array($ext, $allowed_ext, true) || $file['size'] > $max_size) {
-            $error = 'Invalid file type or size. Allowed: PDF, DOCX (max 10MB).';
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $detected_mime = $finfo->file($file['tmp_name']);
+        if (!in_array($ext, $allowed_ext, true) || !in_array($detected_mime, $allowed_doc, true) || $file['size'] > $max_size) {
+            $error = 'Invalid file type or size. Allowed: PDF, DOCX, DOC, ZIP (max 10MB).';
         } else {
             $doc_type_input = $_POST['document_type'] ?? 'other';
             $doc_type = $doc_type_input === 'documentation' ? 'proposal' : $doc_type_input;
@@ -220,7 +225,7 @@ if ($project && !$is_archived && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_v
 
                         // Insert new version with chapter if applicable
                         $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, chapter, file_name, file_path, file_size, mime_type, uploader_id, version_number, is_latest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)');
-                        $stmt->execute([$project['id'], $doc_type, $chapter, $file['name'], $rel, $file['size'], $file['type'], $uid, $next_version]);
+                        $stmt->execute([$project['id'], $doc_type, $chapter, $file['name'], $rel, $file['size'], $detected_mime, $uid, $next_version]);
 
                         $insert_notification = $pdo->prepare('INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)');
                         foreach ($recipient_ids as $recipient_id) {
@@ -343,6 +348,10 @@ require_once __DIR__ . '/../includes/header.php';
                         <textarea class="form-control" id="description" name="description" rows="4"><?= e($_POST['description'] ?? '') ?></textarea>
                     </div>
                     <div class="col-12">
+                        <label class="form-label" for="keywords">Keywords <small class="text-muted">(comma-separated, e.g. machine learning, IoT, blockchain)</small></label>
+                        <input type="text" class="form-control" id="keywords" name="keywords" placeholder="keyword1, keyword2, keyword3" value="<?= e($_POST['keywords'] ?? '') ?>">
+                    </div>
+                    <div class="col-12">
                         <button type="submit" class="btn btn-primary">Submit for Approval</button>
                     </div>
                 </div>
@@ -359,7 +368,14 @@ require_once __DIR__ . '/../includes/header.php';
                 </div>
                 <div class="card-body">
                     <h5 class="mb-3"><?= e($project['title']) ?></h5>
-                    <?php if ($project['description']): ?><p class="text-muted mb-0"><?= nl2br(e($project['description'])) ?></p><?php endif; ?>
+                    <?php if ($project['description']): ?><p class="text-muted mb-2"><?= nl2br(e($project['description'])) ?></p><?php endif; ?>
+                    <?php if (!empty($project['keywords'])): ?>
+                        <p class="mb-0">
+                            <?php foreach (array_filter(array_map('trim', explode(',', (string) $project['keywords']))) as $kw): ?>
+                                <span class="badge bg-secondary me-1"><?= e($kw) ?></span>
+                            <?php endforeach; ?>
+                        </p>
+                    <?php endif; ?>
                     <?php if (in_array($project['status'], ['draft', 'rejected'], true)): ?>
                         <hr>
                         <form method="post" class="mt-3">
@@ -373,6 +389,10 @@ require_once __DIR__ . '/../includes/header.php';
                                 <div class="col-12">
                                     <label class="form-label" for="description">Project Description</label>
                                     <textarea class="form-control" id="description" name="description" rows="4"><?= e($project['description'] ?? '') ?></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label" for="keywords">Keywords <small class="text-muted">(comma-separated)</small></label>
+                                    <input type="text" class="form-control" id="keywords" name="keywords" placeholder="keyword1, keyword2" value="<?= e($project['keywords'] ?? '') ?>">
                                 </div>
                                 <div class="col-12">
                                     <button type="submit" class="btn btn-primary">Resubmit for Approval</button>
@@ -499,6 +519,64 @@ require_once __DIR__ . '/../includes/header.php';
                 </table>
             <?php else: ?>
                 <p class="text-muted mb-0">No documents uploaded yet.</p>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if (!empty($project['id'])): ?>
+    <?php
+        // Milestones
+        $ms_stmt = $pdo->prepare('SELECT * FROM project_milestones WHERE project_id = ? ORDER BY due_date ASC');
+        $ms_stmt->execute([(int) $project['id']]);
+        $milestones = $ms_stmt->fetchAll();
+        $ms_total = count($milestones);
+        $ms_done  = count(array_filter($milestones, fn($m) => $m['completed_at'] !== null));
+    ?>
+    <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-flag me-1"></i> Milestones &amp; Deadlines</span>
+            <?php if ($ms_total > 0): ?>
+                <small class="text-muted"><?= $ms_done ?>/<?= $ms_total ?> completed</small>
+            <?php endif; ?>
+        </div>
+        <div class="card-body">
+            <?php if ($ms_total > 0): ?>
+                <div class="progress mb-3" style="height:10px;">
+                    <div class="progress-bar bg-success" style="width:<?= $ms_total > 0 ? round($ms_done / $ms_total * 100) : 0 ?>%"></div>
+                </div>
+                <?php foreach ($milestones as $ms):
+                    $overdue = $ms['completed_at'] === null && $ms['due_date'] < date('Y-m-d');
+                    $done    = $ms['completed_at'] !== null;
+                ?>
+                <div class="d-flex align-items-start gap-3 mb-3 p-3 rounded border <?= $done ? 'border-success bg-light' : ($overdue ? 'border-danger' : '') ?>">
+                    <div class="mt-1">
+                        <?php if ($done): ?>
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i>
+                        <?php elseif ($overdue): ?>
+                            <i class="bi bi-exclamation-circle-fill text-danger fs-5"></i>
+                        <?php else: ?>
+                            <i class="bi bi-circle text-secondary fs-5"></i>
+                        <?php endif; ?>
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="fw-semibold"><?= e($ms['title']) ?></div>
+                        <?php if ($ms['description']): ?><div class="text-muted small"><?= e($ms['description']) ?></div><?php endif; ?>
+                        <div class="small mt-1">
+                            <?php if ($ms['chapter_ref']): ?><span class="badge bg-info text-dark me-1"><?= e(str_replace('chapter', 'Chapter ', $ms['chapter_ref'])) ?></span><?php endif; ?>
+                            <span class="<?= $overdue ? 'text-danger fw-semibold' : 'text-muted' ?>">
+                                Due: <?= e(date('M j, Y', strtotime($ms['due_date']))) ?>
+                                <?= $overdue ? ' — Overdue' : '' ?>
+                            </span>
+                            <?php if ($done): ?>
+                                <span class="text-success ms-2">Completed <?= e(date('M j, Y', strtotime($ms['completed_at']))) ?></span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <p class="text-muted mb-0">No milestones set yet. Your supervisor will add milestones to track your progress.</p>
             <?php endif; ?>
         </div>
     </div>

@@ -266,6 +266,35 @@ function send_assessment_notification_email(string $email, string $student_name,
     return send_template_email($email, 'New Assessment Received', $title, $content, 'View Assessment', $cta_url);
 }
 
+function send_logbook_feedback_email(string $email, string $student_name, string $project_title, string $entry_title, bool $approved, string $comment): bool {
+    $status_word = $approved ? 'Approved' : 'Flagged';
+    $title = "Logbook Entry $status_word";
+    $content  = "<p>Hi $student_name,</p>";
+    $content .= "<p>Your supervisor has reviewed a logbook entry for <strong>" . htmlspecialchars($project_title, ENT_QUOTES, 'UTF-8') . "</strong>.</p>";
+    $content .= "<p><strong>Entry:</strong> " . htmlspecialchars($entry_title, ENT_QUOTES, 'UTF-8') . "</p>";
+    $content .= "<p><strong>Status:</strong> <span style=\"color:" . ($approved ? '#16a34a' : '#dc2626') . ";font-weight:600;\">$status_word</span></p>";
+    if ($comment !== '') {
+        $content .= "<p><strong>Supervisor comment:</strong></p>";
+        $content .= "<blockquote style=\"border-left:4px solid #6366f1;padding-left:15px;margin:15px 0;color:#374151;\">" . nl2br(htmlspecialchars($comment, ENT_QUOTES, 'UTF-8')) . "</blockquote>";
+    }
+    $content .= "<p>Log in to view your logbook and respond if needed.</p>";
+
+    $cta_url = get_app_url('student/logbook.php');
+    return send_template_email($email, "Logbook Entry $status_word — FYP Vault", $title, $content, 'View Logbook', $cta_url);
+}
+
+function send_milestone_reminder_email(string $email, string $student_name, string $project_title, string $milestone_title, string $due_date): bool {
+    $title = 'Milestone Due Soon';
+    $content  = "<p>Hi $student_name,</p>";
+    $content .= "<p>A milestone is approaching for your project <strong>" . htmlspecialchars($project_title, ENT_QUOTES, 'UTF-8') . "</strong>:</p>";
+    $content .= "<p><strong>Milestone:</strong> " . htmlspecialchars($milestone_title, ENT_QUOTES, 'UTF-8') . "</p>";
+    $content .= "<p><strong>Due:</strong> " . htmlspecialchars($due_date, ENT_QUOTES, 'UTF-8') . "</p>";
+    $content .= "<p>Log in to check progress and ensure this milestone is on track.</p>";
+
+    $cta_url = get_app_url('student/project.php');
+    return send_template_email($email, 'Milestone Due Soon — FYP Vault', $title, $content, 'View Project', $cta_url);
+}
+
 function send_password_reset_email(string $email, string $name, string $reset_url): bool {
     $safeName = htmlspecialchars(trim($name) ?: 'User', ENT_QUOTES, 'UTF-8');
     $safeUrl  = htmlspecialchars($reset_url, ENT_QUOTES, 'UTF-8');

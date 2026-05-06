@@ -156,6 +156,39 @@ $is_archived = ($project['status'] ?? '') === 'archived';
 ensure_member_rating_table($pdo);
 ensure_project_contribution_status_table($pdo);
 ensure_pending_completion_status($pdo);
+ensure_project_milestones_table($pdo);
+
+// Handle milestone actions
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && !$is_archived) {
+    $ms_action = $_POST['action'] ?? '';
+    if ($ms_action === 'add_milestone') {
+        $ms_title  = trim($_POST['ms_title'] ?? '');
+        $ms_desc   = trim($_POST['ms_desc'] ?? '');
+        $ms_due    = trim($_POST['ms_due'] ?? '');
+        $ms_chap   = trim($_POST['ms_chapter'] ?? '');
+        if ($ms_title !== '' && $ms_due !== '') {
+            $pdo->prepare('INSERT INTO project_milestones (project_id, title, description, chapter_ref, due_date, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([$pid, $ms_title, $ms_desc ?: null, $ms_chap ?: null, $ms_due, $uid]);
+            flash('success', 'Milestone added.');
+            redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#tab-milestones'));
+        }
+    } elseif ($ms_action === 'complete_milestone') {
+        $ms_id = (int) ($_POST['ms_id'] ?? 0);
+        if ($ms_id > 0) {
+            $pdo->prepare('UPDATE project_milestones SET completed_at = NOW(), completed_by = ? WHERE id = ? AND project_id = ? AND completed_at IS NULL')
+                ->execute([$uid, $ms_id, $pid]);
+            flash('success', 'Milestone marked complete.');
+            redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#tab-milestones'));
+        }
+    } elseif ($ms_action === 'delete_milestone') {
+        $ms_id = (int) ($_POST['ms_id'] ?? 0);
+        if ($ms_id > 0) {
+            $pdo->prepare('DELETE FROM project_milestones WHERE id = ? AND project_id = ?')->execute([$ms_id, $pid]);
+            flash('success', 'Milestone removed.');
+            redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#tab-milestones'));
+        }
+    }
+}
 $member_profiles = get_project_member_profiles($pdo, $project, $uid);
 
 // Load contribution_status for each member from the separate tracking table
@@ -339,8 +372,9 @@ require_once __DIR__ . '/../includes/header.php';
 
 <ul class="nav nav-tabs mb-4" id="detailTabs" role="tablist">
     <li class="nav-item" role="presentation"><a class="nav-link active" data-bs-toggle="tab" href="#documents">Documents</a></li>
-    <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#assessments">Assessments</a></li>
+    <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#milestones" id="tab-milestones">Milestones</a></li>
     <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#logbook">Logbook</a></li>
+    <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#assessments">Assessments</a></li>
     <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#contributions">Contributions</a></li>
 </ul>
 
@@ -382,6 +416,115 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+    </div>
+
+    <div class="tab-pane fade" id="milestones">
+        <?php
+        $ms_stmt = $pdo->prepare('SELECT * FROM project_milestones WHERE project_id = ? ORDER BY due_date ASC');
+        $ms_stmt->execute([$pid]);
+        $milestones = $ms_stmt->fetchAll();
+        $ms_total = count($milestones);
+        $ms_done  = count(array_filter($milestones, fn($m) => $m['completed_at'] !== null));
+        ?>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Milestone Tracker</span>
+                <?php if ($ms_total > 0): ?>
+                    <span class="badge bg-secondary"><?= $ms_done ?>/<?= $ms_total ?> complete</span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <?php if ($ms_total > 0): ?>
+                    <div class="progress mb-4" style="height:12px;" title="<?= $ms_done ?>/<?= $ms_total ?> milestones done">
+                        <div class="progress-bar bg-success" style="width:<?= round($ms_done / $ms_total * 100) ?>%"></div>
+                    </div>
+                    <?php foreach ($milestones as $ms):
+                        $overdue = $ms['completed_at'] === null && $ms['due_date'] < date('Y-m-d');
+                        $done    = $ms['completed_at'] !== null;
+                    ?>
+                    <div class="d-flex align-items-start gap-3 mb-3 p-3 rounded border <?= $done ? 'border-success' : ($overdue ? 'border-danger' : 'border-secondary') ?>">
+                        <div class="mt-1 fs-5">
+                            <?php if ($done): ?>
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                            <?php elseif ($overdue): ?>
+                                <i class="bi bi-exclamation-circle-fill text-danger"></i>
+                            <?php else: ?>
+                                <i class="bi bi-circle text-secondary"></i>
+                            <?php endif; ?>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold"><?= e($ms['title']) ?></div>
+                            <?php if ($ms['description']): ?><div class="text-muted small"><?= e($ms['description']) ?></div><?php endif; ?>
+                            <div class="small mt-1">
+                                <?php if ($ms['chapter_ref']): ?><span class="badge bg-info text-dark me-1"><?= e(str_replace('chapter', 'Chapter ', $ms['chapter_ref'])) ?></span><?php endif; ?>
+                                <span class="<?= $overdue ? 'text-danger fw-semibold' : 'text-muted' ?>">Due: <?= e(date('M j, Y', strtotime($ms['due_date']))) ?><?= $overdue ? ' — Overdue' : '' ?></span>
+                                <?php if ($done): ?><span class="text-success ms-2">Completed <?= e(date('M j, Y', strtotime($ms['completed_at']))) ?></span><?php endif; ?>
+                            </div>
+                        </div>
+                        <?php if (!$is_archived): ?>
+                        <div class="d-flex flex-column gap-1">
+                            <?php if (!$done): ?>
+                            <form method="post">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="complete_milestone">
+                                <input type="hidden" name="ms_id" value="<?= $ms['id'] ?>">
+                                <button class="btn btn-sm btn-success" title="Mark complete"><i class="bi bi-check-lg"></i></button>
+                            </form>
+                            <?php endif; ?>
+                            <form method="post" onsubmit="return confirm('Remove this milestone?')">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="action" value="delete_milestone">
+                                <input type="hidden" name="ms_id" value="<?= $ms['id'] ?>">
+                                <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <p class="text-muted">No milestones yet. Add one below to track progress.</p>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php if (!$is_archived): ?>
+        <div class="card">
+            <div class="card-header">Add Milestone</div>
+            <div class="card-body">
+                <form method="post">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="add_milestone">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Title <span class="text-danger">*</span></label>
+                            <input type="text" name="ms_title" class="form-control" placeholder="e.g. Submit Chapter 1 draft" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Due Date <span class="text-danger">*</span></label>
+                            <input type="date" name="ms_due" class="form-control" required min="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Chapter (optional)</label>
+                            <select name="ms_chapter" class="form-select">
+                                <option value="">— None —</option>
+                                <option value="chapter1">Chapter 1</option>
+                                <option value="chapter2">Chapter 2</option>
+                                <option value="chapter3">Chapter 3</option>
+                                <option value="chapter4">Chapter 4</option>
+                                <option value="chapter5">Chapter 5</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notes (optional)</label>
+                            <input type="text" name="ms_desc" class="form-control" placeholder="Additional instructions or criteria...">
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle me-1"></i>Add Milestone</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="tab-pane fade" id="assessments">

@@ -349,6 +349,83 @@ function reset_repeating_student(PDO $pdo, int $student_id): void {
         ->execute([$student_id]);
 }
 
+function ensure_project_milestones_table(PDO $pdo): void {
+    $pdo->exec('CREATE TABLE IF NOT EXISTS project_milestones (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NULL,
+        chapter_ref VARCHAR(50) NULL,
+        due_date DATE NOT NULL,
+        completed_at TIMESTAMP NULL DEFAULT NULL,
+        completed_by INT UNSIGNED NULL DEFAULT NULL,
+        created_by INT UNSIGNED NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id),
+        INDEX idx_due (due_date),
+        CONSTRAINT fk_ms_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+}
+
+function ensure_project_keywords_column(PDO $pdo): void {
+    $stmt = $pdo->prepare("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'projects' AND COLUMN_NAME = 'keywords'");
+    $stmt->execute();
+    if ($stmt->fetchColumn()) {
+        return;
+    }
+    try {
+        $pdo->exec("ALTER TABLE projects ADD COLUMN keywords TEXT NULL DEFAULT NULL AFTER description");
+    } catch (Throwable $e) {
+        if (stripos($e->getMessage(), 'duplicate column name') === false) {
+            throw $e;
+        }
+    }
+}
+
+function ensure_group_submission_tables(PDO $pdo): void {
+    // Extend groups table with lifecycle columns
+    $existing_cols = array_column(
+        $pdo->query('DESCRIBE `groups`')->fetchAll(),
+        'Field'
+    );
+    $to_add = [
+        'status'        => "ALTER TABLE `groups` ADD COLUMN status ENUM('formed','under_review','approved','rejected') NOT NULL DEFAULT 'formed' AFTER is_active",
+        'workflow'      => "ALTER TABLE `groups` ADD COLUMN workflow ENUM('topic_first','direct_proposal') NOT NULL DEFAULT 'topic_first' AFTER status",
+        'batch_ref'     => "ALTER TABLE `groups` ADD COLUMN batch_ref VARCHAR(120) NULL AFTER workflow",
+        'department'    => "ALTER TABLE `groups` ADD COLUMN department VARCHAR(255) NULL AFTER batch_ref",
+        'supervisor_id' => "ALTER TABLE `groups` ADD COLUMN supervisor_id INT UNSIGNED NULL AFTER department",
+    ];
+    foreach ($to_add as $col => $sql) {
+        if (!in_array($col, $existing_cols, true)) {
+            try { $pdo->exec($sql); } catch (Throwable $e) {
+                if (stripos($e->getMessage(), 'duplicate') === false) throw $e;
+            }
+        }
+    }
+
+    // Group submissions table (pre-project topic / proposal tracking)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `group_submissions` (
+        id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        group_id         INT UNSIGNED NOT NULL,
+        type             ENUM('topic','proposal') NOT NULL,
+        title            VARCHAR(500) NOT NULL,
+        abstract         TEXT NULL,
+        keywords         TEXT NULL,
+        document_path    VARCHAR(500) NULL,
+        document_mime    VARCHAR(120) NULL,
+        status           ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+        rejection_reason TEXT NULL,
+        similarity_json  TEXT NULL,
+        similarity_top   DECIMAL(5,2) NULL,
+        submitted_by     INT UNSIGNED NOT NULL,
+        reviewed_by      INT UNSIGNED NULL,
+        submitted_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at      TIMESTAMP NULL,
+        INDEX idx_gs_group  (group_id),
+        INDEX idx_gs_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
 function has_other_active_hod_in_department(PDO $pdo, string $department, int $excludeUserId = 0): bool {
     $info = resolve_department_info($pdo, $department);
     if (empty($info['variants'])) {

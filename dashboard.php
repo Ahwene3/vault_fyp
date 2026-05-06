@@ -18,10 +18,40 @@ if ($role === 'student') {
     $stats['repeat_required'] = (bool) ($student_tracking['repeat_required'] ?? 0);
 }
 if ($role === 'student') {
-    // Get student's group
-    $stmt = $pdo->prepare('SELECT g.id, g.name, g.created_by, COUNT(gm.id) AS member_count FROM `groups` g LEFT JOIN `group_members` gm ON g.id = gm.group_id WHERE g.id IN (SELECT group_id FROM `group_members` WHERE student_id = ?) GROUP BY g.id LIMIT 1');
+    ensure_group_submission_tables($pdo);
+    // Get student's group — prefer HOD-formed (batch_ref set) then any active group
+    $stmt = $pdo->prepare(
+        'SELECT g.id, g.name, g.created_by, g.status AS group_status, g.workflow, g.batch_ref,
+                g.supervisor_id, COUNT(gm.id) AS member_count
+         FROM `groups` g
+         LEFT JOIN `group_members` gm ON g.id = gm.group_id
+         WHERE g.id IN (SELECT group_id FROM `group_members` WHERE student_id = ?)
+           AND g.is_active = 1
+         GROUP BY g.id
+         ORDER BY (g.batch_ref IS NOT NULL) DESC, g.created_at DESC
+         LIMIT 1'
+    );
     $stmt->execute([$uid]);
     $stats['group'] = $stmt->fetch();
+
+    // HOD-formed group lifecycle info
+    $stats['hod_group'] = null;
+    if (!empty($stats['group']['batch_ref'])) {
+        $stats['hod_group'] = $stats['group'];
+        // Latest submission for this group
+        $ls = $pdo->prepare(
+            'SELECT type, title, status, rejection_reason, submitted_at
+             FROM group_submissions WHERE group_id=? ORDER BY submitted_at DESC LIMIT 1'
+        );
+        $ls->execute([(int) $stats['group']['id']]);
+        $stats['hod_group']['latest_submission'] = $ls->fetch() ?: null;
+        // Supervisor name
+        if (!empty($stats['group']['supervisor_id'])) {
+            $sv = $pdo->prepare('SELECT full_name FROM users WHERE id=? LIMIT 1');
+            $sv->execute([$stats['group']['supervisor_id']]);
+            $stats['hod_group']['supervisor_name'] = (string) ($sv->fetchColumn() ?: '');
+        }
+    }
 
     if (!empty($stats['group']['id'])) {
         $stmt = $pdo->prepare('SELECT id, title, status, supervisor_id FROM projects WHERE group_id = ? ORDER BY updated_at DESC LIMIT 1');
@@ -47,9 +77,23 @@ if ($role === 'student') {
     }
 
     if (!empty($stats['project']['id'])) {
+        ensure_project_milestones_table($pdo);
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM logbook_entries WHERE project_id = ?');
         $stmt->execute([(int) $stats['project']['id']]);
         $stats['logbook_count'] = (int) $stmt->fetchColumn();
+
+        // Chapter upload progress (5 chapters)
+        $stmt = $pdo->prepare('SELECT COUNT(DISTINCT chapter) FROM project_documents WHERE project_id = ? AND document_type = "proposal" AND chapter IS NOT NULL AND is_latest = 1');
+        $stmt->execute([(int) $stats['project']['id']]);
+        $stats['chapters_uploaded'] = (int) $stmt->fetchColumn();
+
+        // Milestone progress
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM project_milestones WHERE project_id = ?');
+        $stmt->execute([(int) $stats['project']['id']]);
+        $stats['ms_total'] = (int) $stmt->fetchColumn();
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM project_milestones WHERE project_id = ? AND completed_at IS NOT NULL');
+        $stmt->execute([(int) $stats['project']['id']]);
+        $stats['ms_done'] = (int) $stmt->fetchColumn();
 
         $stmt = $pdo->prepare('SELECT
             le.id,
@@ -70,6 +114,9 @@ if ($role === 'student') {
     } else {
         $stats['logbook_count'] = 0;
         $stats['recent_logbook_entries'] = [];
+        $stats['chapters_uploaded'] = 0;
+        $stats['ms_total'] = 0;
+        $stats['ms_done'] = 0;
     }
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_read = 0');
     $stmt->execute([$uid]);
@@ -85,6 +132,7 @@ if ($role === 'student') {
     $stmt->execute([$uid]);
     $stats['unread_messages'] = (int) $stmt->fetchColumn();
 } elseif ($role === 'hod') {
+    ensure_group_submission_tables($pdo);
     $fresh_hod = get_user_by_id($uid);
     $hod_department_source = trim((string) ($fresh_hod['department'] ?? ($user['department'] ?? '')));
     $hod_department_info = resolve_department_info($pdo, $hod_department_source);
@@ -100,6 +148,17 @@ if ($role === 'student') {
 
         $count_stmt->execute(array_merge(['submitted'], $hod_department_info['variants']));
         $stats['pending_topics'] = (int) $count_stmt->fetchColumn();
+
+        // Pending group submissions (new workflow)
+        $ph_dept = sql_placeholders(count($hod_department_info['variants']));
+        $gs_stmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM group_submissions gs
+             JOIN `groups` g ON g.id = gs.group_id
+             WHERE gs.status = 'pending'
+               AND LOWER(TRIM(COALESCE(g.department,''))) IN ($ph_dept)"
+        );
+        $gs_stmt->execute($hod_department_info['variants']);
+        $stats['pending_group_subs'] = (int) $gs_stmt->fetchColumn();
 
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM projects p JOIN users u ON p.student_id = u.id WHERE p.status IN ("in_progress","approved") AND LOWER(TRIM(COALESCE(u.department, ""))) IN (' . $dept_placeholders . ')');
         $stmt->execute($hod_department_info['variants']);
@@ -274,6 +333,60 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
         <span class="student-scope-pill">Student View</span>
     </div>
 
+    <?php if (!empty($stats['hod_group'])): ?>
+    <?php
+        $hg       = $stats['hod_group'];
+        $hg_st    = $hg['group_status'] ?? 'formed';
+        $hg_sub   = $hg['latest_submission'] ?? null;
+        $hg_badge = match($hg_st) {
+            'under_review' => ['bg-info text-dark',  'Under Review'],
+            'approved'     => ['bg-success',          'Approved'],
+            'rejected'     => ['bg-danger',           'Rejected — Resubmit'],
+            default        => ['bg-secondary',        'Group Formed — Pending Submission'],
+        };
+    ?>
+    <div class="card mb-4 border-2 <?= $hg_st === 'approved' ? 'border-success' : ($hg_st === 'under_review' ? 'border-info' : ($hg_st === 'rejected' ? 'border-danger' : 'border-secondary')) ?>">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-people-fill me-1"></i> <?= e($hg['name']) ?></span>
+            <span class="badge <?= $hg_badge[0] ?>"><?= $hg_badge[1] ?></span>
+        </div>
+        <div class="card-body py-2">
+            <div class="row align-items-center g-2">
+                <div class="col-md-8">
+                    <?php if ($hg_sub): ?>
+                        <small class="text-muted">
+                            Last <?= e($hg_sub['type']) ?> submitted:
+                            <strong><?= e(mb_substr($hg_sub['title'], 0, 60)) ?></strong>
+                            <span class="badge bg-light text-dark border ms-1"><?= e(ucfirst($hg_sub['status'])) ?></span>
+                        </small>
+                        <?php if ($hg_st === 'rejected' && $hg_sub['rejection_reason']): ?>
+                            <div class="text-danger small mt-1">Reason: <?= e($hg_sub['rejection_reason']) ?></div>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <small class="text-muted">No submission yet. Submit your
+                            <?= $hg['workflow'] === 'direct_proposal' ? 'project proposal' : 'project topic' ?> to begin.
+                        </small>
+                    <?php endif; ?>
+                    <?php if (!empty($hg['supervisor_name'])): ?>
+                        <div class="mt-1 small"><i class="bi bi-person-check text-success me-1"></i>Supervisor: <strong><?= e($hg['supervisor_name']) ?></strong></div>
+                    <?php endif; ?>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <?php if (in_array($hg_st, ['formed', 'rejected'], true)): ?>
+                        <a href="<?= base_url('student/group_submit.php') ?>" class="btn btn-primary btn-sm">
+                            <i class="bi bi-send me-1"></i> Submit <?= $hg['workflow'] === 'direct_proposal' ? 'Proposal' : 'Topic' ?>
+                        </a>
+                    <?php elseif ($hg_st === 'approved'): ?>
+                        <a href="<?= base_url('student/group_submit.php') ?>" class="btn btn-outline-success btn-sm">View Submission</a>
+                    <?php else: ?>
+                        <span class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Awaiting HOD review</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="row g-3 mb-4">
         <div class="col-xl-3 col-md-6">
             <a href="<?= base_url('student/group.php') ?>" class="text-decoration-none text-reset d-block h-100">
@@ -337,6 +450,51 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
         </div>
     </div>
 
+    <?php
+        // Overall progress score
+        $status_pct_map = ['draft'=>5,'submitted'=>15,'approved'=>30,'in_progress'=>50,'pending_completion'=>80,'completed'=>100,'archived'=>100];
+        $status_pct = $status_pct_map[$stats['project']['status'] ?? 'draft'] ?? 5;
+        $chapter_pct = min(100, (int)(($stats['chapters_uploaded'] / 5) * 100));
+        $ms_pct = $stats['ms_total'] > 0 ? (int)(($stats['ms_done'] / $stats['ms_total']) * 100) : null;
+    ?>
+    <div class="card mb-4">
+        <div class="card-header">Project Progress</div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="fw-semibold">Project Status</small>
+                        <small class="text-muted"><?= $status_pct ?>%</small>
+                    </div>
+                    <div class="progress" style="height:10px;">
+                        <div class="progress-bar bg-primary" style="width:<?= $status_pct ?>%"></div>
+                    </div>
+                    <div class="text-muted small mt-1"><?= e(ucfirst(str_replace('_',' ', $stats['project']['status'] ?? 'draft'))) ?></div>
+                </div>
+                <div class="col-md-4">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="fw-semibold">Chapters Submitted</small>
+                        <small class="text-muted"><?= (int) $stats['chapters_uploaded'] ?>/5</small>
+                    </div>
+                    <div class="progress" style="height:10px;">
+                        <div class="progress-bar bg-success" style="width:<?= $chapter_pct ?>%"></div>
+                    </div>
+                    <div class="text-muted small mt-1"><?= $chapter_pct ?>% of documentation uploaded</div>
+                </div>
+                <div class="col-md-4">
+                    <div class="d-flex justify-content-between mb-1">
+                        <small class="fw-semibold">Milestones</small>
+                        <small class="text-muted"><?= $stats['ms_done'] ?>/<?= $stats['ms_total'] ?: '—' ?></small>
+                    </div>
+                    <div class="progress" style="height:10px;">
+                        <div class="progress-bar bg-warning" style="width:<?= $ms_pct ?? 0 ?>%"></div>
+                    </div>
+                    <div class="text-muted small mt-1"><?= $ms_pct !== null ? $ms_pct . '% milestones complete' : 'No milestones set yet' ?></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card mb-4">
         <div class="card-header d-flex align-items-center justify-content-between">
             <span>Recent Logbook Entries</span>
@@ -392,7 +550,11 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
     <div class="card">
         <div class="card-header">Quick Actions</div>
         <div class="card-body d-flex flex-wrap gap-2">
-            <a href="<?= base_url('student/project.php') ?>" class="btn btn-primary">My Project / Submit Topic</a>
+            <?php if (!empty($stats['hod_group'])): ?>
+                <a href="<?= base_url('student/group_submit.php') ?>" class="btn btn-primary">Submit Topic / Proposal</a>
+            <?php endif; ?>
+            <a href="<?= base_url('student/project.php') ?>" class="btn btn-primary">My Project</a>
+            <a href="<?= base_url('student/group.php') ?>" class="btn btn-outline-primary">My Group</a>
             <a href="<?= base_url('student/logbook.php') ?>" class="btn btn-outline-primary">Logbook</a>
             <a href="<?= base_url('messages.php') ?>" class="btn btn-outline-primary">Messages</a>
         </div>
@@ -533,8 +695,30 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
         </div>
     <?php endif; ?>
 
+    <?php if (!empty($stats['pending_group_subs'])): ?>
+    <div class="alert alert-warning d-flex align-items-center gap-3 mb-3 py-2">
+        <i class="bi bi-inbox-fill fs-5"></i>
+        <span><strong><?= (int) $stats['pending_group_subs'] ?></strong> group submission(s) awaiting your review.</span>
+        <a href="<?= base_url('hod/group_review.php') ?>" class="btn btn-warning btn-sm ms-auto">Review Now</a>
+    </div>
+    <?php endif; ?>
+
     <div class="row g-3 mb-4 hod-stats-row">
-        <div class="col-xl-4 col-md-6">
+        <div class="col-xl-3 col-md-6">
+            <a href="<?= base_url('hod/group_review.php') ?>" class="text-decoration-none text-reset d-block h-100">
+                <div class="card stat-card hod-stat-card h-100">
+                    <div class="card-body d-flex align-items-center">
+                        <div class="hod-stat-icon text-primary me-3"><i class="bi bi-people"></i></div>
+                        <div>
+                            <h6 class="text-muted mb-1">Group Submissions</h6>
+                            <div class="hod-stat-value"><?= (int)($stats['pending_group_subs'] ?? 0) ?></div>
+                            <small class="text-muted">Pending review</small>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-xl-3 col-md-6">
             <a href="<?= base_url('hod/topics.php') ?>" class="text-decoration-none text-reset d-block h-100">
                 <div class="card stat-card hod-stat-card h-100">
                     <div class="card-body d-flex align-items-center">
@@ -547,7 +731,7 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
                 </div>
             </a>
         </div>
-        <div class="col-xl-4 col-md-6">
+        <div class="col-xl-3 col-md-6">
             <a href="<?= base_url('hod/reports.php') ?>" class="text-decoration-none text-reset d-block h-100">
                 <div class="card stat-card hod-stat-card h-100">
                     <div class="card-body d-flex align-items-center">
@@ -560,7 +744,7 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
                 </div>
             </a>
         </div>
-        <div class="col-xl-4 col-md-12">
+        <div class="col-xl-3 col-md-6">
             <a href="<?= base_url('hod/archive.php') ?>" class="text-decoration-none text-reset d-block h-100">
                 <div class="card stat-card hod-stat-card h-100">
                     <div class="card-body d-flex align-items-center">
@@ -644,7 +828,9 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
     <div class="card hod-actions-card">
         <div class="card-header">Quick Actions</div>
         <div class="card-body d-flex flex-wrap gap-2">
-            <a href="<?= base_url('hod/topics.php') ?>" class="btn hod-btn-primary">Review Topics</a>
+            <a href="<?= base_url('hod/group_import.php') ?>" class="btn hod-btn-primary">Import Groups</a>
+            <a href="<?= base_url('hod/group_review.php') ?>" class="btn hod-btn-primary">Review Submissions</a>
+            <a href="<?= base_url('hod/topics.php') ?>" class="btn hod-btn-outline">Review Topics</a>
             <a href="<?= base_url('hod/assign.php') ?>" class="btn hod-btn-outline">Assign Supervisors</a>
             <a href="<?= base_url('hod/archive.php') ?>" class="btn hod-btn-outline">Archive</a>
             <a href="<?= base_url('hod/reports.php') ?>" class="btn hod-btn-outline">Reports</a>

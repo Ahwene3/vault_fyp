@@ -436,4 +436,54 @@ require_once __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if ($project_context): ?>
+<script>
+(function () {
+    var lastId = <?= !empty($messages) ? (int) end($messages)['id'] : 0 ?>;
+    var pid    = <?= (int) $project_id ?>;
+    var uid    = <?= (int) $uid ?>;
+
+    function poll() {
+        fetch('<?= base_url('api/messages_poll.php') ?>?pid=' + pid + '&after=' + lastId, {credentials: 'same-origin'})
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+                if (!data || !data.messages || data.messages.length === 0) return;
+                var box = document.querySelector('.card-body.overflow-auto');
+                if (!box) return;
+                data.messages.forEach(function(m) {
+                    var mine = m.sender_id == uid;
+                    var wrap = document.createElement('div');
+                    wrap.className = 'mb-3' + (mine ? ' text-end' : '');
+                    var bubble = document.createElement('div');
+                    bubble.className = 'd-inline-block text-start p-3 rounded ' + (mine ? 'bg-success text-white' : 'bg-dark text-light');
+                    bubble.style.maxWidth = '85%';
+                    if (!mine) {
+                        var name = document.createElement('div');
+                        name.className = 'small fw-semibold mb-1';
+                        name.textContent = m.sender_name;
+                        bubble.appendChild(name);
+                    }
+                    var body = document.createElement('div');
+                    body.textContent = m.body;
+                    bubble.appendChild(body);
+                    var time = document.createElement('small');
+                    time.className = 'opacity-75 d-block mt-1';
+                    time.textContent = m.created_at_fmt;
+                    bubble.appendChild(time);
+                    wrap.appendChild(bubble);
+                    box.appendChild(wrap);
+                    lastId = Math.max(lastId, m.id);
+                });
+                box.scrollTop = box.scrollHeight;
+            })
+            .catch(function() {});
+    }
+
+    setInterval(poll, 15000);
+    var box = document.querySelector('.card-body.overflow-auto');
+    if (box) box.scrollTop = box.scrollHeight;
+})();
+</script>
+<?php endif; ?>
+
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

@@ -6,16 +6,19 @@ require_once __DIR__ . '/includes/auth.php';
 require_login();
 
 $pdo = getPDO();
+ensure_project_keywords_column($pdo);
+
 $q = trim($_GET['q'] ?? '');
 $year = trim($_GET['year'] ?? '');
 $supervisor_id = isset($_GET['supervisor']) ? (int) $_GET['supervisor'] : 0;
+$dept_filter = trim($_GET['dept'] ?? '');
 $date_from = trim($_GET['date_from'] ?? '');
 $date_to = trim($_GET['date_to'] ?? '');
-$show_all = isset($_GET['all']); // toggle to include non-archived
+$show_all = isset($_GET['all']);
 
 $base_status_filter = $show_all ? 'p.status != "draft"' : 'p.status = "archived"';
 
-$sql = 'SELECT p.id, p.title, p.description, p.academic_year, p.status, p.updated_at,
+$sql = 'SELECT p.id, p.title, p.description, p.keywords, p.academic_year, p.status, p.updated_at,
     u.full_name AS student_name, u.reg_number, u.department,
     g.name AS group_name,
     sup.full_name AS supervisor_name, sup.id AS supervisor_id,
@@ -29,9 +32,9 @@ $sql = 'SELECT p.id, p.title, p.description, p.academic_year, p.status, p.update
 $params = [];
 
 if ($q !== '') {
-    $sql .= ' AND (p.title LIKE ? OR u.full_name LIKE ? OR u.reg_number LIKE ? OR sup.full_name LIKE ?)';
+    $sql .= ' AND (p.title LIKE ? OR p.description LIKE ? OR p.keywords LIKE ? OR u.full_name LIKE ? OR u.reg_number LIKE ? OR sup.full_name LIKE ?)';
     $term = '%' . $q . '%';
-    $params = array_merge($params, [$term, $term, $term, $term]);
+    $params = array_merge($params, [$term, $term, $term, $term, $term, $term]);
 }
 if ($year !== '') {
     $sql .= ' AND p.academic_year = ?';
@@ -40,6 +43,10 @@ if ($year !== '') {
 if ($supervisor_id > 0) {
     $sql .= ' AND p.supervisor_id = ?';
     $params[] = $supervisor_id;
+}
+if ($dept_filter !== '') {
+    $sql .= ' AND LOWER(TRIM(COALESCE(u.department, ""))) = LOWER(?)';
+    $params[] = $dept_filter;
 }
 if ($date_from !== '') {
     $sql .= ' AND (am.archived_at >= ? OR (am.archived_at IS NULL AND p.updated_at >= ?))';
@@ -70,6 +77,7 @@ if (!empty($projects)) {
 
 $years = $pdo->query('SELECT DISTINCT academic_year FROM projects WHERE academic_year IS NOT NULL ORDER BY academic_year DESC')->fetchAll(PDO::FETCH_COLUMN);
 $supervisors = $pdo->query('SELECT DISTINCT sup.id, sup.full_name FROM projects p LEFT JOIN users sup ON p.supervisor_id = sup.id WHERE sup.id IS NOT NULL ORDER BY sup.full_name')->fetchAll();
+$departments = $pdo->query('SELECT DISTINCT TRIM(department) AS dept FROM users WHERE department IS NOT NULL AND department != "" ORDER BY dept')->fetchAll(PDO::FETCH_COLUMN);
 
 $total = count($projects);
 $archived_count = 0;
@@ -143,7 +151,7 @@ require_once __DIR__ . '/includes/header.php';
             <?php if ($show_all): ?><input type="hidden" name="all" value="1"><?php endif; ?>
             <div class="col-md-4">
                 <label class="form-label">Search</label>
-                <input type="text" name="q" class="form-control" placeholder="Topic, student name, reg. number, supervisor…" value="<?= e($q) ?>">
+                <input type="text" name="q" class="form-control" placeholder="Topic, keyword, student name, reg. number, supervisor…" value="<?= e($q) ?>">
             </div>
             <div class="col-md-2">
                 <label class="form-label">Year</label>
@@ -151,6 +159,15 @@ require_once __DIR__ . '/includes/header.php';
                     <option value="">All</option>
                     <?php foreach ($years as $y): ?>
                         <option value="<?= e($y) ?>" <?= $year === $y ? 'selected' : '' ?>><?= e($y) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Department</label>
+                <select name="dept" class="form-select">
+                    <option value="">All</option>
+                    <?php foreach ($departments as $d): ?>
+                        <option value="<?= e($d) ?>" <?= $dept_filter === $d ? 'selected' : '' ?>><?= e(get_department_display_name($pdo, $d)) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -163,15 +180,15 @@ require_once __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label">Archived From</label>
                 <input type="date" name="date_from" class="form-control" value="<?= e($date_from) ?>">
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label">Archived To</label>
                 <input type="date" name="date_to" class="form-control" value="<?= e($date_to) ?>">
             </div>
-            <div class="col-md-3 d-flex align-items-end gap-2">
+            <div class="col-md-2 d-flex align-items-end gap-2">
                 <button type="submit" class="btn btn-primary">Search</button>
                 <a href="<?= base_url('vault.php' . ($show_all ? '?all=1' : '')) ?>" class="btn btn-outline-secondary">Clear</a>
             </div>
@@ -221,7 +238,16 @@ require_once __DIR__ . '/includes/header.php';
                             $docs = $doc_map[(int) $p['id']] ?? [];
                         ?>
                             <tr>
-                                <td class="fw-semibold"><?= e($p['title']) ?></td>
+                                <td>
+                                    <div class="fw-semibold"><?= e($p['title']) ?></div>
+                                    <?php if (!empty($p['keywords'])): ?>
+                                        <div class="mt-1">
+                                            <?php foreach (array_slice(array_filter(array_map('trim', explode(',', (string) $p['keywords']))), 0, 4) as $kw): ?>
+                                                <span class="badge bg-light text-secondary border me-1" style="font-size:0.7em;"><?= e($kw) ?></span>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </td>
                                 <td><?= e($p['group_name'] ?: 'Solo Vault') ?></td>
                                 <td><?= e($p['supervisor_name'] ?: '—') ?></td>
                                 <td><?= e($p['academic_year'] ?: '—') ?></td>
