@@ -127,6 +127,7 @@ if ($renderAppSidebar) {
     $app_sidebar_links[] = ['label' => 'Dashboard', 'href' => 'dashboard.php', 'icon' => 'bi-speedometer2'];
     if ($user['role'] === 'student') {
         $app_sidebar_links[] = ['label' => 'My Group', 'href' => 'student/group.php', 'icon' => 'bi-people'];
+        $app_sidebar_links[] = ['label' => 'Submit Topic/Proposal', 'href' => 'student/group_submit.php', 'icon' => 'bi-send'];
         $app_sidebar_links[] = ['label' => 'My Project', 'href' => 'student/project.php', 'icon' => 'bi-journal-richtext'];
         $app_sidebar_links[] = ['label' => 'Logbook', 'href' => 'student/logbook.php', 'icon' => 'bi-book'];
         $app_sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
@@ -134,6 +135,8 @@ if ($renderAppSidebar) {
         $app_sidebar_links[] = ['label' => 'Group Vaults', 'href' => 'supervisor/students.php', 'icon' => 'bi-people'];
         $app_sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
     } elseif ($user['role'] === 'hod') {
+        $app_sidebar_links[] = ['label' => 'Form Groups', 'href' => 'hod/group_import.php', 'icon' => 'bi-file-arrow-up'];
+        $app_sidebar_links[] = ['label' => 'Review Submissions', 'href' => 'hod/group_review.php', 'icon' => 'bi-clipboard-check'];
         $app_sidebar_links[] = ['label' => 'Topics', 'href' => 'hod/topics.php', 'icon' => 'bi-clock-history'];
         $app_sidebar_links[] = ['label' => 'Assign Supervisors', 'href' => 'hod/assign.php', 'icon' => 'bi-person-check'];
         $app_sidebar_links[] = ['label' => 'Archive', 'href' => 'hod/archive.php', 'icon' => 'bi-archive'];
