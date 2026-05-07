@@ -583,4 +583,3 @@ function upsert_interest(PDO $pdo, int $user_id, string $type, string $value, in
         ON DUPLICATE KEY UPDATE weight = LEAST(weight + ?, 1000), last_used_at = NOW()")
         ->execute([$user_id, $type, mb_substr($value, 0, 200), $delta, $delta]);
 }
-}
