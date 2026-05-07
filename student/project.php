@@ -100,7 +100,7 @@ $is_archived = !empty($project) && ($project['status'] ?? '') === 'archived';
 $error = '';
 $success = '';
 
-// Submit new topic or update draft
+// Submit new topic or update draft (with optional proposal document)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     if ($is_archived) {
         flash('error', 'This project is archived and cannot be modified.');
@@ -108,35 +108,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     }
     $action = $_POST['action'] ?? '';
     $title = trim($_POST['title'] ?? '');
-    $description = trim($_POST['description'] ?? '');
     $keywords = trim($_POST['keywords'] ?? '');
 
     if ($action === 'submit_topic') {
         if (strlen($title) < 10) {
             $error = 'Project title must be at least 10 characters.';
         } else {
-            if ($project && in_array($project['status'], ['draft', 'rejected'], true)) {
-                if ($group_id && (int) ($project['group_id'] ?? 0) === $group_id) {
-                    $stmt = $pdo->prepare('UPDATE projects SET title = ?, description = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND group_id = ?');
-                    $stmt->execute([$title, $description ?: null, $keywords ?: null, $project['id'], $group_id]);
+            // Handle optional proposal file upload
+            $proposal_file = null;
+            if (!empty($_FILES['proposal_file']['name'])) {
+                $file = $_FILES['proposal_file'];
+                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $detected_mime = $finfo->file($file['tmp_name']);
+                $allowed_ext = ['pdf', 'docx', 'doc'];
+                $allowed_mime = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword'];
+                $max_size = 15 * 1024 * 1024;
+
+                if (!in_array($ext, $allowed_ext, true) || !in_array($detected_mime, $allowed_mime, true)) {
+                    $error = 'Invalid file type. Allowed: PDF, DOCX, DOC.';
+                } elseif ($file['size'] > $max_size) {
+                    $error = 'File size exceeds 15MB limit.';
                 } else {
-                    $stmt = $pdo->prepare('UPDATE projects SET title = ?, description = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND student_id = ?');
-                    $stmt->execute([$title, $description ?: null, $keywords ?: null, $project['id'], $uid]);
-                }
-            } else {
-                if ($group_id) {
-                    $stmt = $pdo->prepare('SELECT student_id FROM `group_members` WHERE group_id = ? ORDER BY CASE WHEN role = "lead" THEN 0 ELSE 1 END, id ASC LIMIT 1');
-                    $stmt->execute([$group_id]);
-                    $group_owner = (int) ($stmt->fetchColumn() ?: $uid);
-                    $stmt = $pdo->prepare('INSERT INTO projects (student_id, group_id, title, description, keywords, status, submitted_at) VALUES (?, ?, ?, ?, ?, "submitted", NOW())');
-                    $stmt->execute([$group_owner, $group_id, $title, $description ?: null, $keywords ?: null]);
-                } else {
-                    $stmt = $pdo->prepare('INSERT INTO projects (student_id, title, description, keywords, status, submitted_at) VALUES (?, ?, ?, ?, "submitted", NOW())');
-                    $stmt->execute([$uid, $title, $description ?: null, $keywords ?: null]);
+                    $proposal_file = $file;
                 }
             }
-            flash('success', 'Project topic submitted for approval.');
-            redirect(base_url('student/project.php'));
+
+            if (!$error) {
+                try {
+                    $pdo->beginTransaction();
+
+                    if ($project && in_array($project['status'], ['draft', 'rejected'], true)) {
+                        if ($group_id && (int) ($project['group_id'] ?? 0) === $group_id) {
+                            $stmt = $pdo->prepare('UPDATE projects SET title = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND group_id = ?');
+                            $stmt->execute([$title, $keywords ?: null, $project['id'], $group_id]);
+                        } else {
+                            $stmt = $pdo->prepare('UPDATE projects SET title = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND student_id = ?');
+                            $stmt->execute([$title, $keywords ?: null, $project['id'], $uid]);
+                        }
+                        $project_id = $project['id'];
+                    } else {
+                        if ($group_id) {
+                            $stmt = $pdo->prepare('SELECT student_id FROM `group_members` WHERE group_id = ? ORDER BY CASE WHEN role = "lead" THEN 0 ELSE 1 END, id ASC LIMIT 1');
+                            $stmt->execute([$group_id]);
+                            $group_owner = (int) ($stmt->fetchColumn() ?: $uid);
+                            $stmt = $pdo->prepare('INSERT INTO projects (student_id, group_id, title, keywords, status, submitted_at) VALUES (?, ?, ?, ?, "submitted", NOW())');
+                            $stmt->execute([$group_owner, $group_id, $title, $keywords ?: null]);
+                        } else {
+                            $stmt = $pdo->prepare('INSERT INTO projects (student_id, title, keywords, status, submitted_at) VALUES (?, ?, ?, "submitted", NOW())');
+                            $stmt->execute([$uid, $title, $keywords ?: null]);
+                        }
+                        $project_id = (int) $pdo->lastInsertId();
+                    }
+
+                    // Upload proposal file if provided
+                    if ($proposal_file) {
+                        $upload_dir = dirname(__DIR__) . '/uploads/projects/' . $project_id;
+                        if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
+
+                        $safe_name = preg_replace('/[^a-zA-Z0-9._-]/', '_', $proposal_file['name']);
+                        $safe_name = date('Ymd_His') . '_' . $safe_name;
+                        $path = $upload_dir . '/' . $safe_name;
+
+                        if (move_uploaded_file($proposal_file['tmp_name'], $path)) {
+                            $rel = 'projects/' . $project_id . '/' . $safe_name;
+                            $detected_mime = (new finfo(FILEINFO_MIME_TYPE))->file($path);
+
+                            // Mark previous proposals as not latest
+                            $pdo->prepare('UPDATE project_documents SET is_latest = 0 WHERE project_id = ? AND document_type = ? AND is_latest = 1')->execute([$project_id, 'proposal']);
+
+                            // Insert proposal document
+                            $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, file_name, file_path, file_size, mime_type, uploader_id, version_number, is_latest) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)');
+                            $stmt->execute([$project_id, 'proposal', $proposal_file['name'], $rel, $proposal_file['size'], $detected_mime, $uid]);
+                        } else {
+                            throw new Exception('Failed to upload proposal file.');
+                        }
+                    }
+
+                    $pdo->commit();
+                    flash('success', 'Project topic submitted for approval.' . ($proposal_file ? ' Proposal document uploaded.' : ''));
+                    redirect(base_url('student/project.php'));
+                } catch (Throwable $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    if ($proposal_file && isset($path) && is_file($path)) {
+                        unlink($path);
+                    }
+                    $error = 'Unable to submit project. Please try again.';
+                }
+            }
         }
     }
 }
@@ -335,17 +396,18 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="card-body">
             <p class="text-muted">Submit your final year project topic for approval.</p>
             <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
-            <form method="post">
+            <form method="post" enctype="multipart/form-data">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="submit_topic">
                 <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label" for="title">Project Title</label>
-                        <input type="text" class="form-control" id="title" name="title" required minlength="10" value="<?= e($_POST['title'] ?? '') ?>">
+                    <div class="col-12">
+                        <label class="form-label" for="title">Project Title <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="title" name="title" required minlength="10" placeholder="Enter your project title (min 10 characters)" value="<?= e($_POST['title'] ?? '') ?>">
                     </div>
                     <div class="col-12">
-                        <label class="form-label" for="description">Project Description</label>
-                        <textarea class="form-control" id="description" name="description" rows="4"><?= e($_POST['description'] ?? '') ?></textarea>
+                        <label class="form-label" for="proposal_file">Proposal Document <span class="text-muted">(Optional)</span></label>
+                        <input type="file" class="form-control" id="proposal_file" name="proposal_file" accept=".pdf,.doc,.docx">
+                        <small class="d-block text-muted mt-2"><i class="bi bi-info-circle"></i> Upload your proposal document (PDF, DOCX, or DOC). Max file size: 15MB</small>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="keywords">Keywords <small class="text-muted">(comma-separated, e.g. machine learning, IoT, blockchain)</small></label>
@@ -363,36 +425,64 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="col-lg-7">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>Project Title & Description</span>
+                    <span>Project Title & Proposal</span>
                     <span class="badge <?= $project['status'] === 'approved' || $project['status'] === 'in_progress' || $project['status'] === 'completed' ? 'bg-success' : ($project['status'] === 'rejected' ? 'bg-danger' : 'bg-warning text-dark') ?>"><?= e(ucfirst(str_replace('_', ' ', (string) $project['status']))) ?></span>
                 </div>
                 <div class="card-body">
                     <h5 class="mb-3"><?= e($project['title']) ?></h5>
-                    <?php if ($project['description']): ?><p class="text-muted mb-2"><?= nl2br(e($project['description'])) ?></p><?php endif; ?>
+                    <?php
+                        // Fetch proposal document if it exists
+                        $proposal_doc = null;
+                        if ($project['id']) {
+                            $stmt = $pdo->prepare('SELECT * FROM project_documents WHERE project_id = ? AND document_type = ? AND is_latest = 1 LIMIT 1');
+                            $stmt->execute([$project['id'], 'proposal']);
+                            $proposal_doc = $stmt->fetch();
+                        }
+                    ?>
+                    <?php if ($proposal_doc): ?>
+                        <div class="mb-3 p-3 border rounded bg-light">
+                            <div class="d-flex align-items-center justify-content-between">
+                                <div class="d-flex align-items-center gap-2">
+                                    <i class="bi bi-file-pdf text-danger fs-4"></i>
+                                    <div>
+                                        <div class="fw-semibold"><?= e($proposal_doc['file_name']) ?></div>
+                                        <small class="text-muted">Uploaded <?= e(date('M j, Y H:i', strtotime($proposal_doc['uploaded_at']))) ?> • <?= number_format($proposal_doc['file_size'] / 1024 / 1024, 2) ?>MB</small>
+                                    </div>
+                                </div>
+                                <a href="<?= base_url('download.php?id=' . $proposal_doc['id']) ?>" class="btn btn-sm btn-outline-primary">Download</a>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <p class="text-muted mb-3"><small>No proposal document uploaded yet.</small></p>
+                    <?php endif; ?>
                     <?php if (!empty($project['keywords'])): ?>
-                        <p class="mb-0">
-                            <?php foreach (array_filter(array_map('trim', explode(',', (string) $project['keywords']))) as $kw): ?>
-                                <span class="badge bg-secondary me-1"><?= e($kw) ?></span>
-                            <?php endforeach; ?>
-                        </p>
+                        <div>
+                            <small class="text-muted d-block mb-2">Keywords:</small>
+                            <p class="mb-0">
+                                <?php foreach (array_filter(array_map('trim', explode(',', (string) $project['keywords']))) as $kw): ?>
+                                    <span class="badge bg-secondary me-1"><?= e($kw) ?></span>
+                                <?php endforeach; ?>
+                            </p>
+                        </div>
                     <?php endif; ?>
                     <?php if (in_array($project['status'], ['draft', 'rejected'], true)): ?>
                         <hr>
-                        <form method="post" class="mt-3">
+                        <form method="post" enctype="multipart/form-data" class="mt-3">
                             <?= csrf_field() ?>
                             <input type="hidden" name="action" value="submit_topic">
                             <div class="row g-3">
                                 <div class="col-12">
-                                    <label class="form-label" for="title">Project Title</label>
-                                    <input type="text" class="form-control" id="title" name="title" required minlength="10" value="<?= e($project['title']) ?>">
+                                    <label class="form-label" for="title_edit">Project Title <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="title_edit" name="title" required minlength="10" value="<?= e($project['title']) ?>">
                                 </div>
                                 <div class="col-12">
-                                    <label class="form-label" for="description">Project Description</label>
-                                    <textarea class="form-control" id="description" name="description" rows="4"><?= e($project['description'] ?? '') ?></textarea>
+                                    <label class="form-label" for="proposal_file_edit">Proposal Document <span class="text-muted">(Optional)</span></label>
+                                    <input type="file" class="form-control" id="proposal_file_edit" name="proposal_file" accept=".pdf,.doc,.docx">
+                                    <small class="d-block text-muted mt-2"><i class="bi bi-info-circle"></i> Upload your proposal document (PDF, DOCX, or DOC). Max file size: 15MB</small>
                                 </div>
                                 <div class="col-12">
-                                    <label class="form-label" for="keywords">Keywords <small class="text-muted">(comma-separated)</small></label>
-                                    <input type="text" class="form-control" id="keywords" name="keywords" placeholder="keyword1, keyword2" value="<?= e($project['keywords'] ?? '') ?>">
+                                    <label class="form-label" for="keywords_edit">Keywords <small class="text-muted">(comma-separated)</small></label>
+                                    <input type="text" class="form-control" id="keywords_edit" name="keywords" placeholder="keyword1, keyword2" value="<?= e($project['keywords'] ?? '') ?>">
                                 </div>
                                 <div class="col-12">
                                     <button type="submit" class="btn btn-primary">Resubmit for Approval</button>
