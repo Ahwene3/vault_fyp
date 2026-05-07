@@ -265,7 +265,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="student-stat-icon text-primary me-3"><i class="bi bi-person-badge"></i></div>
                 <div>
                     <h6 class="text-muted mb-1">Assigned Supervisor</h6>
-                    <div class="student-stat-value"><?= e($group_project['supervisor_name'] ?? 'Dr. Amina') ?></div>
+                    <div class="student-stat-value"><?= e($group_project['supervisor_name'] ?? 'Not assigned') ?></div>
                 </div>
             </div>
         </div>
