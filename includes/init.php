@@ -445,3 +445,142 @@ function has_other_active_hod_in_department(PDO $pdo, string $department, int $e
     $stmt->execute($params);
     return (bool) $stmt->fetchColumn();
 }
+
+function ensure_discovery_tables(PDO $pdo): void {
+    // Project domain tags
+    $pdo->exec("CREATE TABLE IF NOT EXISTS project_tags (
+        id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name      VARCHAR(100) NOT NULL UNIQUE,
+        domain    VARCHAR(80)  NOT NULL,
+        slug      VARCHAR(100) NOT NULL UNIQUE,
+        color     VARCHAR(20)  NOT NULL DEFAULT '#6c757d',
+        icon      VARCHAR(50)  NOT NULL DEFAULT 'bi-tag',
+        is_active TINYINT(1)   NOT NULL DEFAULT 1,
+        INDEX idx_domain (domain)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Seed canonical tag set (idempotent)
+    $pdo->exec("INSERT IGNORE INTO project_tags (name, domain, slug, color, icon) VALUES
+        ('Artificial Intelligence',   'AI & ML',           'artificial-intelligence',   '#7c3aed', 'bi-cpu'),
+        ('Machine Learning',          'AI & ML',           'machine-learning',          '#8b5cf6', 'bi-graph-up-arrow'),
+        ('Deep Learning',             'AI & ML',           'deep-learning',             '#6d28d9', 'bi-layers'),
+        ('Computer Vision',           'AI & ML',           'computer-vision',           '#5b21b6', 'bi-camera'),
+        ('Natural Language Processing','AI & ML',          'nlp',                       '#7e22ce', 'bi-chat-text'),
+        ('Cybersecurity',             'Cybersecurity',     'cybersecurity',             '#dc2626', 'bi-shield-lock'),
+        ('Network Security',          'Cybersecurity',     'network-security',          '#b91c1c', 'bi-lock'),
+        ('Cryptography',              'Cybersecurity',     'cryptography',              '#991b1b', 'bi-key'),
+        ('Penetration Testing',       'Cybersecurity',     'penetration-testing',       '#ef4444', 'bi-bug'),
+        ('Networking',                'Networking',        'networking',                '#0891b2', 'bi-diagram-3'),
+        ('IoT',                       'Networking',        'iot',                       '#0e7490', 'bi-wifi'),
+        ('Cloud Computing',           'Networking',        'cloud-computing',           '#0284c7', 'bi-cloud'),
+        ('5G',                        'Networking',        '5g',                        '#0369a1', 'bi-broadcast'),
+        ('Web Development',           'Software Engineering','web-development',          '#059669', 'bi-code-slash'),
+        ('Mobile Development',        'Software Engineering','mobile-development',       '#047857', 'bi-phone'),
+        ('Database Systems',          'Software Engineering','database-systems',         '#065f46', 'bi-database'),
+        ('Software Architecture',     'Software Engineering','software-architecture',    '#0f766e', 'bi-boxes'),
+        ('DevOps',                    'Software Engineering','devops',                   '#0d9488', 'bi-gear'),
+        ('Blockchain',                'Emerging Tech',     'blockchain',                '#b45309', 'bi-link-45deg'),
+        ('Augmented Reality',         'Emerging Tech',     'augmented-reality',         '#92400e', 'bi-phone-landscape'),
+        ('Robotics',                  'Emerging Tech',     'robotics',                  '#78350f', 'bi-robot'),
+        ('Data Analytics',            'Data Science',      'data-analytics',            '#1d4ed8', 'bi-bar-chart'),
+        ('Big Data',                  'Data Science',      'big-data',                  '#1e40af', 'bi-hdd-stack'),
+        ('Healthcare IT',             'Domain Applications','healthcare-it',            '#be185d', 'bi-heart-pulse'),
+        ('Education Technology',      'Domain Applications','education-technology',     '#9d174d', 'bi-mortarboard'),
+        ('Maritime Technology',       'Domain Applications','maritime-technology',      '#1e3a5f', 'bi-water')
+    ");
+
+    // Many-to-many: project ↔ tag
+    $pdo->exec("CREATE TABLE IF NOT EXISTS project_tag_map (
+        project_id INT UNSIGNED NOT NULL,
+        tag_id     INT UNSIGNED NOT NULL,
+        PRIMARY KEY (project_id, tag_id),
+        INDEX idx_tag (tag_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // View tracking (per user, per project)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS project_views (
+        id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        user_id    INT UNSIGNED NULL,
+        ip_hash    VARCHAR(64)  NULL,
+        viewed_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pv_project (project_id),
+        INDEX idx_pv_user    (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Ensure view_count cache column on projects
+    $cols = array_column($pdo->query('DESCRIBE projects')->fetchAll(), 'Field');
+    if (!in_array('view_count', $cols, true)) {
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN view_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER updated_at'); } catch (Throwable $e) {}
+    }
+    if (!in_array('technology_stack', $cols, true)) {
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN technology_stack VARCHAR(500) NULL AFTER keywords'); } catch (Throwable $e) {}
+    }
+    if (!in_array('avg_rating', $cols, true)) {
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN avg_rating DECIMAL(3,2) NULL AFTER view_count'); } catch (Throwable $e) {}
+    }
+    if (!in_array('rating_count', $cols, true)) {
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN rating_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER avg_rating'); } catch (Throwable $e) {}
+    }
+
+    // Star ratings + written reviews
+    $pdo->exec("CREATE TABLE IF NOT EXISTS project_ratings (
+        id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id  INT UNSIGNED NOT NULL,
+        user_id     INT UNSIGNED NOT NULL,
+        rating      TINYINT UNSIGNED NOT NULL COMMENT '1-5',
+        comment     TEXT NULL,
+        status      ENUM('visible','flagged','hidden') NOT NULL DEFAULT 'visible',
+        flagged_by  INT UNSIGNED NULL,
+        flagged_at  TIMESTAMP NULL,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_user_project (user_id, project_id),
+        INDEX idx_pr_project (project_id),
+        INDEX idx_pr_status  (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // User interest tracking for recommendations
+    $pdo->exec("CREATE TABLE IF NOT EXISTS user_interests (
+        id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id       INT UNSIGNED NOT NULL,
+        interest_type ENUM('tag','domain','keyword','viewed') NOT NULL,
+        value         VARCHAR(200) NOT NULL,
+        weight        SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+        last_used_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_ui (user_id, interest_type, value),
+        INDEX idx_ui_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+/** Record a project view and bump view_count. Deduplicates per user (one per hour). */
+function record_project_view(PDO $pdo, int $project_id, ?int $user_id): void {
+    $ip_hash = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? '');
+
+    // Dedup: same user within last hour
+    if ($user_id) {
+        $stmt = $pdo->prepare('SELECT id FROM project_views WHERE project_id = ? AND user_id = ? AND viewed_at > DATE_SUB(NOW(), INTERVAL 1 HOUR) LIMIT 1');
+        $stmt->execute([$project_id, $user_id]);
+        if ($stmt->fetchColumn()) return;
+    }
+
+    $pdo->prepare('INSERT INTO project_views (project_id, user_id, ip_hash) VALUES (?, ?, ?)')->execute([$project_id, $user_id, $ip_hash]);
+    $pdo->prepare('UPDATE projects SET view_count = view_count + 1 WHERE id = ?')->execute([$project_id]);
+}
+
+/** Refresh avg_rating and rating_count on projects table. */
+function refresh_project_rating(PDO $pdo, int $project_id): void {
+    $stmt = $pdo->prepare('SELECT AVG(rating), COUNT(*) FROM project_ratings WHERE project_id = ? AND status = "visible"');
+    $stmt->execute([$project_id]);
+    [$avg, $cnt] = $stmt->fetch(PDO::FETCH_NUM);
+    $pdo->prepare('UPDATE projects SET avg_rating = ?, rating_count = ? WHERE id = ?')->execute([$avg ?: null, (int) $cnt, $project_id]);
+}
+
+/** Upsert a user interest weight. */
+function upsert_interest(PDO $pdo, int $user_id, string $type, string $value, int $delta = 1): void {
+    $pdo->prepare("INSERT INTO user_interests (user_id, interest_type, value, weight)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE weight = LEAST(weight + ?, 1000), last_used_at = NOW()")
+        ->execute([$user_id, $type, mb_substr($value, 0, 200), $delta, $delta]);
+}
+}

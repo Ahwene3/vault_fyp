@@ -405,7 +405,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <input type="text" class="form-control" id="title" name="title" required minlength="10" placeholder="Enter your project title (min 10 characters)" value="<?= e($_POST['title'] ?? '') ?>">
                     </div>
                     <div class="col-12">
-                        <label class="form-label" for="proposal_file">Proposal Document <span class="text-muted">(Optional)</span></label>
+                        <label class="form-label" for="proposal_file">Proposal Document <span class="text-muted">(Recommended)</span></label>
                         <input type="file" class="form-control" id="proposal_file" name="proposal_file" accept=".pdf,.doc,.docx">
                         <small class="d-block text-muted mt-2"><i class="bi bi-info-circle"></i> Upload your proposal document (PDF, DOCX, or DOC). Max file size: 15MB</small>
                     </div>

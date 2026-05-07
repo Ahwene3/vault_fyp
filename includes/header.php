@@ -142,11 +142,12 @@ if ($renderAppSidebar) {
         $app_sidebar_links[] = ['label' => 'Archive', 'href' => 'hod/archive.php', 'icon' => 'bi-archive'];
         $app_sidebar_links[] = ['label' => 'Reports', 'href' => 'hod/reports.php', 'icon' => 'bi-graph-up'];
     } elseif ($user['role'] === 'admin') {
-        $app_sidebar_links[] = ['label' => 'Users', 'href' => 'admin/users.php', 'icon' => 'bi-people'];
-        $app_sidebar_links[] = ['label' => 'Projects', 'href' => 'admin/projects.php', 'icon' => 'bi-folder'];
-        $app_sidebar_links[] = ['label' => 'Reports', 'href' => 'admin/reports.php', 'icon' => 'bi-clipboard-data'];
+        $app_sidebar_links[] = ['label' => 'Users',            'href' => 'admin/users.php',            'icon' => 'bi-people'];
+        $app_sidebar_links[] = ['label' => 'Projects',         'href' => 'admin/projects.php',         'icon' => 'bi-folder'];
+        $app_sidebar_links[] = ['label' => 'Moderate Reviews', 'href' => 'admin/moderate_reviews.php', 'icon' => 'bi-shield-check'];
+        $app_sidebar_links[] = ['label' => 'Reports',          'href' => 'admin/reports.php',          'icon' => 'bi-clipboard-data'];
     }
-    $app_sidebar_links[] = ['label' => 'Project Vault', 'href' => 'vault.php', 'icon' => 'bi-archive'];
+    $app_sidebar_links[] = ['label' => 'Discover Projects', 'href' => 'vault.php', 'icon' => 'bi-search'];
     $app_sidebar_links[] = ['label' => 'Profile', 'href' => 'profile.php', 'icon' => 'bi-person-circle'];
     $app_sidebar_links[] = ['label' => 'Notifications', 'href' => 'notifications.php', 'icon' => 'bi-bell', 'badge' => $notification_count > 0 ? $notification_count : null];
 }
