@@ -6,7 +6,7 @@ $uid = user_id();
 $pdo = getPDO();
 $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
 
-$stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.reg_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND p.supervisor_id = ?');
+$stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.index_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND p.supervisor_id = ?');
 $stmt->execute([$pid, $uid]);
 $project = $stmt->fetch();
 if (!$project) {
@@ -90,11 +90,11 @@ function get_member_input_metrics(PDO $pdo, int $project_id, int $student_id): a
 
 function get_project_member_profiles(PDO $pdo, array $project, int $supervisor_id): array {
     if (!empty($project['group_id'])) {
-        $stmt = $pdo->prepare('SELECT u.id AS student_id, u.full_name, u.reg_number, u.email, gm.role FROM `group_members` gm JOIN users u ON u.id = gm.student_id WHERE gm.group_id = ? ORDER BY CASE WHEN gm.role = "lead" THEN 0 ELSE 1 END, u.full_name');
+        $stmt = $pdo->prepare('SELECT u.id AS student_id, u.full_name, u.index_number, u.email, gm.role FROM `group_members` gm JOIN users u ON u.id = gm.student_id WHERE gm.group_id = ? ORDER BY CASE WHEN gm.role = "lead" THEN 0 ELSE 1 END, u.full_name');
         $stmt->execute([(int) $project['group_id']]);
         $members = $stmt->fetchAll();
     } else {
-        $stmt = $pdo->prepare('SELECT id AS student_id, full_name, reg_number, email, "lead" AS role FROM users WHERE id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT id AS student_id, full_name, index_number, email, "lead" AS role FROM users WHERE id = ? LIMIT 1');
         $stmt->execute([(int) $project['student_id']]);
         $members = $stmt->fetchAll();
     }
@@ -662,7 +662,7 @@ require_once __DIR__ . '/../includes/header.php';
                                             <?= e($m['full_name']) ?>
                                             <?php if (($m['role'] ?? '') === 'lead'): ?><span class="badge bg-warning text-dark ms-1">Lead</span><?php endif; ?>
                                         </td>
-                                        <td><?= e($m['reg_number'] ?: $m['email']) ?></td>
+                                        <td><?= e($m['index_number'] ?: $m['email']) ?></td>
                                         <td><?= e(ucfirst($m['role'] ?? 'member')) ?></td>
                                         <td><?= (int) $m['docs_uploaded'] ?></td>
                                         <td><?= (int) $m['logbook_entries'] ?></td>

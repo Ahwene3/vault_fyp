@@ -46,10 +46,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['download'])) {
     if ($download === 'template') {
         stream_csv_download(
             'users_import_template.csv',
-            ['Full Name', 'Email Address', 'Role', 'Department', 'Employee/Staff ID', 'Password'],
+            ['Full Name', 'Email Address', 'Role', 'Department', 'Employee/Staff ID', 'Index Number', 'Level', 'Password'],
             [
-                ['Dr. Ahmed Hassan', 'ahmed.hassan@rmu.edu', 'supervisor', 'Marine Engineering Department', 'EMP001', 'Temp#A1B2C3D4a1'],
-                ['Prof. Zainab Ali', 'zainab.ali@rmu.edu', 'hod', 'Department of Transport', 'EMP002', ''],
+                ['Dr. Ahmed Hassan', 'ahmed.hassan@rmu.edu', 'supervisor', 'ICT Department', 'EMP001', '', '', 'Temp#A1B2C3D4a1'],
+                ['Prof. Zainab Ali', 'zainab.ali@rmu.edu', 'hod', 'Department of Transport', 'EMP002', '', '', ''],
+                ['John Mensah', 'john.mensah@rmu.edu', 'student', 'ICT Department', '', 'ICT/2021/001', '300', ''],
+                ['Ama Owusu', 'ama.owusu@rmu.edu', 'student', 'Marine Engineering Department', '', 'ME/2022/015', '200', ''],
             ]
         );
     }
@@ -69,13 +71,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['download'])) {
                 $r['role'] ?? '',
                 $r['department'] ?? '',
                 $r['emp_id'] ?? '',
+                $r['index_number'] ?? '',
+                $r['level'] ?? '',
                 $r['password'] ?? '',
             ];
         }
 
         stream_csv_download(
             (string) ($payload['file_name'] ?? ('import_credentials_' . date('Ymd_His') . '.csv')),
-            ['Full Name', 'Email Address', 'Role', 'Department', 'Employee/Staff ID', 'Password'],
+            ['Full Name', 'Email Address', 'Role', 'Department', 'Employee/Staff ID', 'Index Number', 'Level', 'Password'],
             $rows
         );
     }
@@ -90,14 +94,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
         $uploaded_file_name = (string) $file['name'];
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         
-        if (!in_array($ext, ['csv', 'xlsx', 'xls'], true)) {
-            $errors[] = 'Invalid file format. Please upload CSV or Excel file.';
+        if (!in_array($ext, ['csv', 'xlsx', 'xls', 'txt'], true)) {
+            $errors[] = 'Invalid file format. Please upload CSV, TXT, or Excel file.';
         } elseif ($file['size'] > 5 * 1024 * 1024) {
             $errors[] = 'File is too large. Maximum 5MB allowed.';
         } elseif (empty($errors)) {
-            // Parse CSV or Excel
-            $fp = fopen($file['tmp_name'], 'r');
-            $headers = fgetcsv($fp, 0, ',');
+            // Read entire file, strip UTF-8 BOM, normalise all line endings to LF
+            $raw = file_get_contents($file['tmp_name']);
+            if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+                $raw = substr($raw, 3);
+            }
+            $raw = str_replace(["\r\n", "\r"], "\n", $raw);
+
+            // Write normalised content to a temp stream so fgetcsv can read it
+            $fp = fopen('php://temp', 'r+');
+            fwrite($fp, $raw);
+            rewind($fp);
+            unset($raw);
+
+            // Sniff delimiter from the first line: tab-separated (TSV) or comma-separated (CSV)
+            $first_line = fgets($fp);
+            rewind($fp);
+            $delimiter = substr_count($first_line, "\t") > substr_count($first_line, ',') ? "\t" : ',';
+
+            $headers = fgetcsv($fp, 0, $delimiter);
             
             // Validate headers
             $required_cols = ['Full Name', 'Email Address', 'Role', 'Department'];
@@ -116,7 +136,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                 $row_num = 2;
                 $file_hod_departments = [];
                 $file_seen_emails = [];
-                while (($row = fgetcsv($fp, 0, ',')) !== false) {
+                $file_seen_index_numbers = [];
+                while (($row = fgetcsv($fp, 0, $delimiter)) !== false) {
                     if (count($row) < 3) continue;
                     
                     $total_rows++;
@@ -128,27 +149,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     $role = trim($data['Role'] ?? '');
                     $dept = trim($data['Department'] ?? '');
                     $emp_id = trim($data['Employee/Staff ID'] ?? '');
+                    $index_number = trim($data['Index Number'] ?? '');
+                    $level = trim($data['Level'] ?? '');
                     $password_plain = trim((string) (($data['Password'] ?? '') !== '' ? $data['Password'] : ($data['Temporary Password'] ?? '')));
                     $dept_info = resolve_department_info($pdo, $dept);
-                    
+
                     $row_errors = [];
                     if (!$name) $row_errors[] = 'Missing full name';
                     if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $row_errors[] = 'Invalid email';
-                    if (!in_array($role, ['supervisor', 'hod'])) $row_errors[] = 'Invalid role (must be supervisor or hod)';
+                    if (!in_array($role, ['supervisor', 'hod', 'student'])) $row_errors[] = 'Invalid role (must be supervisor, hod, or student)';
                     if (!$dept) $row_errors[] = 'Missing department';
                     if (!$dept || empty($dept_info['variants'])) $row_errors[] = 'Invalid or inactive department';
                     if ($password_plain !== '' && strlen($password_plain) < 8) $row_errors[] = 'Password must be at least 8 characters when provided';
+                    if ($role === 'student' && !$index_number) $row_errors[] = 'Index Number is required for students';
 
                     $email_key = strtolower($email);
                     if ($email && isset($file_seen_emails[$email_key])) {
                         $row_errors[] = 'Duplicate email in upload file';
                     }
-                    
-                    // Check for duplicate email
+
+                    // Check for duplicate index number within the file
+                    if ($role === 'student' && $index_number && isset($file_seen_index_numbers[strtolower($index_number)])) {
+                        $row_errors[] = 'Duplicate index number in upload file';
+                    }
+
+                    // Check for duplicate email in DB
                     $stmt = $pdo->prepare('SELECT id FROM users WHERE email = ?');
                     $stmt->execute([$email]);
                     if ($stmt->fetch()) {
                         $row_errors[] = 'Email already exists in system';
+                    }
+
+                    // Check for duplicate index number in DB
+                    if ($role === 'student' && $index_number && !$row_errors) {
+                        $stmt = $pdo->prepare('SELECT id FROM users WHERE index_number = ?');
+                        $stmt->execute([$index_number]);
+                        if ($stmt->fetch()) {
+                            $row_errors[] = 'Index number already exists in system';
+                        }
                     }
 
                     if ($role === 'hod' && !$row_errors) {
@@ -160,22 +198,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                             $row_errors[] = 'CSV includes multiple HOD rows for the same department';
                         }
                     }
-                    
+
                     if (!empty($row_errors)) {
                         $errors[] = "Row $row_num: " . implode(', ', $row_errors);
                     } else {
                         $dept_to_store = $dept_info['id'] !== null ? (string) $dept_info['id'] : $dept;
+                        $dept_label    = $dept_info['name'] ?? $dept_info['raw'] ?? $dept;
                         $parsed_data[] = [
-                            'row' => $row_num,
-                            'name' => $name,
-                            'email' => $email,
-                            'role' => $role,
-                            'dept' => $dept_to_store,
-                            'emp_id' => $emp_id ?: null,
-                            'password' => $password_plain !== '' ? $password_plain : null,
+                            'row'          => $row_num,
+                            'name'         => $name,
+                            'email'        => $email,
+                            'role'         => $role,
+                            'dept'         => $dept_to_store,
+                            'dept_label'   => $dept_label,
+                            'emp_id'       => $role !== 'student' ? ($emp_id ?: null) : null,
+                            'index_number' => $role === 'student' ? ($index_number ?: null) : null,
+                            'level'        => $role === 'student' ? ($level ?: null) : null,
+                            'password'     => $password_plain !== '' ? $password_plain : null,
                         ];
                         if ($email) {
                             $file_seen_emails[$email_key] = true;
+                        }
+                        if ($role === 'student' && $index_number) {
+                            $file_seen_index_numbers[strtolower($index_number)] = true;
                         }
                         if ($role === 'hod') {
                             $dept_key = strtolower((string) ($dept_info['name'] ?? $dept_info['raw']));
@@ -238,17 +283,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     }
 
                     $hash = password_hash($plain_password, PASSWORD_DEFAULT);
-                    $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department, is_active) VALUES (?, ?, ?, ?, ?, 1)');
-                    $stmt->execute([$row['email'], $hash, $row['name'], $row['role'], $row['dept']]);
+
+                    if (($row['role'] ?? '') === 'student') {
+                        $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department, index_number, level, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)');
+                        $stmt->execute([$row['email'], $hash, $row['name'], $row['role'], $row['dept'], $row['index_number'] ?? null, $row['level'] ?? null]);
+                    } else {
+                        $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department, is_active) VALUES (?, ?, ?, ?, ?, 1)');
+                        $stmt->execute([$row['email'], $hash, $row['name'], $row['role'], $row['dept']]);
+                    }
                     $success_count++;
 
                     $credential_exports[] = [
-                        'name' => $row['name'],
-                        'email' => $row['email'],
-                        'role' => $row['role'],
-                        'department' => get_department_display_name($pdo, (string) $row['dept']),
-                        'emp_id' => $row['emp_id'] ?? '',
-                        'password' => $plain_password,
+                        'name'         => $row['name'],
+                        'email'        => $row['email'],
+                        'role'         => $row['role'],
+                        'department'   => get_department_display_name($pdo, (string) $row['dept']),
+                        'emp_id'       => $row['emp_id'] ?? '',
+                        'index_number' => $row['index_number'] ?? '',
+                        'level'        => $row['level'] ?? '',
+                        'password'     => $plain_password,
                     ];
                 } catch (Exception $e) {
                     $import_errors[] = "Row {$row['row']} ({$row['email']}): " . $e->getMessage();
@@ -337,12 +390,14 @@ require_once __DIR__ . '/../includes/header.php';
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="parse_file">
                 <div class="mb-3">
-                    <label class="form-label">CSV or Excel File (.csv, .xlsx, .xls) *</label>
-                    <input type="file" class="form-control" name="import_file" required accept=".csv,.xlsx,.xls">
+                    <label class="form-label">CSV, TXT, or Excel File (.csv, .txt, .xlsx, .xls) *</label>
+                    <input type="file" class="form-control" name="import_file" required accept=".csv,.txt,.xlsx,.xls">
                     <small class="text-muted d-block mt-2">
                         <strong>Required columns:</strong> Full Name, Email Address, Role, Department<br>
-                        <strong>Optional columns:</strong> Employee/Staff ID, Password (or Temporary Password)<br>
-                        <strong>Role values:</strong> supervisor, hod<br>
+                        <strong>Optional columns:</strong> Employee/Staff ID, Index Number, Level, Password (or Temporary Password)<br>
+                        <strong>Role values:</strong> supervisor, hod, student<br>
+                        <strong>Students:</strong> Index Number is required; Level is optional (e.g. 100, 200, 300)<br>
+                        <strong>Formats:</strong> Comma-separated (.csv), tab-separated (.txt), or Excel (.xlsx/.xls). Linux/Unix line endings (LF) and Windows line endings (CRLF) are both supported.<br>
                         <strong>Max file size:</strong> 5 MB
                     </small>
                 </div>
@@ -351,10 +406,16 @@ require_once __DIR__ . '/../includes/header.php';
             </form>
             
             <div class="mt-4 p-3 bg-light rounded">
-                <h6>Example CSV Format:</h6>
-                <pre>Full Name,Email Address,Role,Department,Employee/Staff ID,Password
-Dr. Ahmed Hassan,ahmed.hassan@rmu.edu,supervisor,Marine Engineering Department,EMP001,Temp#A1B2C3D4a1
-Prof. Zainab Ali,zainab.ali@rmu.edu,hod,Department of Transport,EMP002,</pre>
+                <h6>Example — Comma-separated (.csv)</h6>
+                <pre class="mb-3" style="font-size:.82em;">Full Name,Email Address,Role,Department,Employee/Staff ID,Index Number,Level,Password
+Dr. Ahmed Hassan,ahmed.hassan@rmu.edu,supervisor,ICT Department,EMP001,,,Temp#A1B2C3D4a1
+Prof. Zainab Ali,zainab.ali@rmu.edu,hod,Department of Transport,EMP002,,,
+John Mensah,john.mensah@rmu.edu,student,ICT Department,,ICT/2021/001,300,
+Ama Owusu,ama.owusu@rmu.edu,student,Marine Engineering Department,,ME/2022/015,200,</pre>
+                <h6>Example — Tab-separated Linux/Unix (.txt)</h6>
+                <pre style="font-size:.82em;">Full Name&#9;Email Address&#9;Role&#9;Department&#9;Employee/Staff ID&#9;Index Number&#9;Level&#9;Password
+Dr. Ahmed Hassan&#9;ahmed.hassan@rmu.edu&#9;supervisor&#9;ICT Department&#9;EMP001&#9;&#9;&#9;
+John Mensah&#9;john.mensah@rmu.edu&#9;student&#9;ICT Department&#9;&#9;ICT/2021/001&#9;300&#9;</pre>
             </div>
         </div>
     </div>
@@ -387,7 +448,8 @@ Prof. Zainab Ali,zainab.ali@rmu.edu,hod,Department of Transport,EMP002,</pre>
                                 <th>Email</th>
                                 <th>Role</th>
                                 <th>Department</th>
-                                <th>Emp. ID</th>
+                                <th>Emp. ID / Index No.</th>
+                                <th>Level</th>
                                 <th>Password</th>
                             </tr>
                         </thead>
@@ -397,9 +459,26 @@ Prof. Zainab Ali,zainab.ali@rmu.edu,hod,Department of Transport,EMP002,</pre>
                                     <td><?= $row['row'] ?></td>
                                     <td><?= e($row['name']) ?></td>
                                     <td><?= e($row['email']) ?></td>
-                                    <td><span class="badge bg-info"><?= e($row['role']) ?></span></td>
-                                    <td><?= e($row['dept']) ?></td>
-                                    <td><?= e($row['emp_id'] ?? '—') ?></td>
+                                    <td>
+                                        <?php
+                                            $badge = match($row['role']) {
+                                                'student'    => 'bg-primary',
+                                                'hod'        => 'bg-danger',
+                                                'supervisor' => 'bg-info',
+                                                default      => 'bg-secondary',
+                                            };
+                                        ?>
+                                        <span class="badge <?= $badge ?>"><?= e($row['role']) ?></span>
+                                    </td>
+                                    <td><?= e($row['dept_label'] ?? $row['dept']) ?></td>
+                                    <td>
+                                        <?php if ($row['role'] === 'student'): ?>
+                                            <?= e($row['index_number'] ?? '—') ?>
+                                        <?php else: ?>
+                                            <?= e($row['emp_id'] ?? '—') ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?= e($row['level'] ?? '—') ?></td>
                                     <td>
                                         <?php if (!empty($row['password'])): ?>
                                             <span class="badge bg-secondary">Provided</span>

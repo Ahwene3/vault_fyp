@@ -203,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && (($_POST['action']
 // Get group members if in a group
 $group_members = [];
 if ($current_group) {
-    $stmt = $pdo->prepare('SELECT gm.*, u.full_name, u.email, u.reg_number FROM `group_members` gm JOIN users u ON gm.student_id = u.id WHERE gm.group_id = ? ORDER BY gm.role DESC, u.full_name');
+    $stmt = $pdo->prepare('SELECT gm.*, u.full_name, u.email, u.index_number FROM `group_members` gm JOIN users u ON gm.student_id = u.id WHERE gm.group_id = ? ORDER BY gm.role DESC, u.full_name');
     $stmt->execute([$current_group['id']]);
     $group_members = $stmt->fetchAll();
 }
@@ -213,7 +213,7 @@ if ($current_group && (int) $current_group['created_by'] === $uid && (int) $curr
     // Exclude students already in a non-archived active group.
     // Students whose only memberships are in archived groups are eligible (repeat students).
     $stmt = $pdo->prepare('
-        SELECT u.id, u.full_name, u.email, u.reg_number, u.repeat_required
+        SELECT u.id, u.full_name, u.email, u.index_number, u.repeat_required
         FROM users u
         WHERE u.role = "student"
           AND u.is_active = 1
@@ -316,7 +316,7 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php if ($m['role'] === 'lead'): ?>
                                 <span class="badge bg-warning text-dark">Lead</span>
                             <?php endif; ?>
-                            <br><small class="text-muted"><?= e($m['reg_number'] ?? $m['email']) ?></small>
+                            <br><small class="text-muted"><?= e($m['index_number'] ?? $m['email']) ?></small>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -339,7 +339,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <select class="form-select" id="member_id" name="member_id" required>
                                     <option value="">-- Choose student --</option>
                                     <?php foreach ($invite_candidates as $c): ?>
-                                        <option value="<?= (int) $c['id'] ?>"><?= e($c['full_name']) ?> (<?= e($c['reg_number'] ?: $c['email']) ?>)</option>
+                                        <option value="<?= (int) $c['id'] ?>"><?= e($c['full_name']) ?> (<?= e($c['index_number'] ?: $c['email']) ?>)</option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>

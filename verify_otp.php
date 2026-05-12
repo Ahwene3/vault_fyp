@@ -51,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Insert user into DB only now that OTP is confirmed.
                     $reg = $_SESSION['pending_registration'];
                     $stmt = $pdo->prepare(
-                        'INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, reg_number, is_verified, verified_at)
+                        'INSERT INTO users (email, password_hash, full_name, first_name, last_name, level, role, department, index_number, is_verified, verified_at)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())'
                     );
                     $stmt->execute([

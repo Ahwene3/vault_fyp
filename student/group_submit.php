@@ -39,7 +39,7 @@ $group_workflow = $group['workflow'];
 
 /* group members */
 $members_stmt = $pdo->prepare(
-    'SELECT u.full_name, u.reg_number, u.email, gm.role
+    'SELECT u.full_name, u.index_number, u.email, gm.role
      FROM group_members gm
      JOIN users u ON u.id = gm.student_id
      WHERE gm.group_id = ?
@@ -68,47 +68,19 @@ $project = $pdo->prepare('SELECT id, title, status FROM projects WHERE group_id=
 $project->execute([$group_id]);
 $project = $project->fetch();
 
-/* determine what students can do now */
-$can_submit_topic    = false;
-$can_submit_proposal = false;
-$submission_type     = 'topic';
-
-if ($group_status === 'formed') {
-    if ($group_workflow === 'direct_proposal') {
-        $can_submit_proposal = true;
-        $submission_type     = 'proposal';
-    } else {
-        $can_submit_topic = true;
-        $submission_type  = 'topic';
-    }
-} elseif ($group_status === 'under_review') {
-    // waiting — nothing to submit
-} elseif ($group_status === 'approved' && $group_workflow === 'topic_first') {
-    $proposal_done = $pdo->prepare(
-        "SELECT id FROM group_submissions WHERE group_id=? AND type='proposal' AND status IN ('pending','approved') LIMIT 1"
-    );
-    $proposal_done->execute([$group_id]);
-    $proposal_already_submitted = (bool) $proposal_done->fetch();
-    if (!$proposal_already_submitted) {
-        $can_submit_proposal = true;
-        $submission_type     = 'proposal';
-    }
-}
+/* students can submit when the group is formed (including after a rejection) */
+$can_submit = ($group_status === 'formed');
 
 $error   = '';
 $success = '';
 
-/* ─── POST: submit topic or proposal ─────────────────────────────────────── */
+/* ─── POST: submit topic + proposal (combined) ───────────────────────────── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
-    if ($group_status === 'under_review') {
-        $error = 'Your submission is currently under review. Please wait for the HOD\'s decision.';
-    } elseif (!$can_submit_topic && !$can_submit_proposal) {
+    if (!$can_submit) {
         $error = 'No submission is required at this stage.';
     } else {
         $title    = trim($_POST['title']    ?? '');
         $keywords = trim($_POST['keywords'] ?? '');
-        $abstract = trim($_POST['abstract'] ?? '');
-        $type     = $submission_type;
 
         if (strlen($title) < 5) {
             $error = 'Title must be at least 5 characters.';
@@ -116,8 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
             $doc_path = null;
             $doc_mime = null;
 
-            /* handle document upload for proposals */
-            if ($type === 'proposal' && !empty($_FILES['document']['name'])) {
+            if (!empty($_FILES['document']['name'])) {
                 $file = $_FILES['document'];
                 if ($file['error'] !== UPLOAD_ERR_OK) {
                     $error = 'File upload error.';
@@ -132,11 +103,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     $allow_ext = ['pdf', 'doc', 'docx'];
 
                     if (!in_array($mime, $allowed, true) || !in_array($ext, $allow_ext, true)) {
-                        $error = 'Only PDF, DOC, DOCX files are allowed for proposals.';
+                        $error = 'Only PDF, DOC, DOCX files are allowed.';
                     } else {
                         $upload_dir = __DIR__ . '/../uploads/submissions/';
                         if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
-                        $filename  = 'grp' . $group_id . '_' . time() . '.' . $ext;
+                        $filename = 'grp' . $group_id . '_' . time() . '.' . $ext;
                         if (move_uploaded_file($file['tmp_name'], $upload_dir . $filename)) {
                             $doc_path = 'uploads/submissions/' . $filename;
                             $doc_mime = $mime;
@@ -148,36 +119,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
             }
 
             if (!$error) {
-                /* compute similarity */
-                $sim_results = find_similar_projects($pdo, $title, $keywords, $abstract);
+                $sim_results = find_similar_projects($pdo, $title, $keywords, '');
                 $top_score   = !empty($sim_results) ? $sim_results[0]['score'] : null;
 
                 $pdo->prepare(
                     'INSERT INTO group_submissions
                      (group_id, type, title, abstract, keywords, document_path, document_mime,
                       status, similarity_json, similarity_top, submitted_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, "pending", ?, ?, ?)'
+                     VALUES (?, "proposal", ?, NULL, ?, ?, ?, "pending", ?, ?, ?)'
                 )->execute([
-                    $group_id,
-                    $type,
-                    $title,
-                    $abstract ?: null,
-                    $keywords ?: null,
-                    $doc_path,
-                    $doc_mime,
+                    $group_id, $title, $keywords ?: null,
+                    $doc_path, $doc_mime,
                     $sim_results ? json_encode($sim_results) : null,
-                    $top_score,
-                    $uid,
+                    $top_score, $uid,
                 ]);
 
-                /* update group status */
-                $pdo->prepare('UPDATE `groups` SET status="under_review" WHERE id=?')
-                    ->execute([$group_id]);
+                $pdo->prepare('UPDATE `groups` SET status="under_review" WHERE id=?')->execute([$group_id]);
                 $group_status = 'under_review';
+                $can_submit   = false;
 
-                /* notify HOD(s) in the group's department */
-                $grp_dept_raw  = (string) ($group['department'] ?? '');
-                $grp_dept_info = resolve_department_info($pdo, $grp_dept_raw);
+                /* notify HOD(s) */
+                $grp_dept_info = resolve_department_info($pdo, (string) ($group['department'] ?? ''));
                 if (!empty($grp_dept_info['variants'])) {
                     $hod_ph   = sql_placeholders(count($grp_dept_info['variants']));
                     $hod_stmt = $pdo->prepare(
@@ -187,23 +149,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     $hod_stmt->execute($grp_dept_info['variants']);
                     foreach ($hod_stmt->fetchAll() as $h) {
                         notify_user(
-                            (int) $h['id'],
-                            'topic_submitted',
-                            ucfirst($type) . ' Submitted',
-                            "Group \"{$group['name']}\" submitted a $type: \"$title\". Review it now.",
+                            (int) $h['id'], 'topic_submitted', 'Topic & Proposal Submitted',
+                            "Group \"{$group['name']}\" submitted their topic and proposal: \"$title\". Review it now.",
                             base_url('hod/group_review.php')
                         );
                     }
                 }
 
-                $success = ucfirst($type) . ' submitted successfully. The HOD will review it shortly.';
+                $success = 'Topic and proposal submitted successfully. The HOD will review it shortly.';
 
-                /* reload latest submission */
                 $s2 = $pdo->prepare('SELECT id, type, title, abstract, keywords, status, rejection_reason, submitted_at FROM group_submissions WHERE group_id=? ORDER BY submitted_at DESC LIMIT 1');
                 $s2->execute([$group_id]);
                 $latest_sub = $s2->fetch();
-                $can_submit_topic    = false;
-                $can_submit_proposal = false;
             }
         }
     }
@@ -249,8 +206,8 @@ require_once __DIR__ . '/../includes/header.php';
                         <li class="d-flex align-items-center gap-2 mb-1">
                             <i class="bi bi-person-circle text-secondary"></i>
                             <span><?= e($m['full_name']) ?></span>
-                            <?php if ($m['reg_number']): ?>
-                                <small class="text-muted">(<?= e($m['reg_number']) ?>)</small>
+                            <?php if ($m['index_number']): ?>
+                                <small class="text-muted">(<?= e($m['index_number']) ?>)</small>
                             <?php endif; ?>
                             <?php if ($m['role'] === 'lead'): ?>
                                 <span class="badge bg-primary" style="font-size:.7em;">Lead</span>
@@ -279,29 +236,19 @@ require_once __DIR__ . '/../includes/header.php';
 <div class="card mb-4">
     <div class="card-body py-3">
         <?php
-        $steps = $group_workflow === 'direct_proposal'
-            ? ['Group Formed', 'Proposal Submitted', 'Under Review', 'Approved & Supervised', 'In Progress']
-            : ['Group Formed', 'Topic Submitted', 'Topic Approved', 'Proposal Submitted', 'Approved & Supervised', 'In Progress'];
-
-        $step_map_topic_first = [
-            'formed'       => 0,
-            'under_review' => (!empty($latest_sub) && $latest_sub['type'] === 'topic') ? 1 : 3,
-            'approved'     => (empty($project)) ? 2 : 4,
-            'rejected'     => 0,
-        ];
-        $step_map_direct = [
+        $steps = ['Group Formed', 'Topic & Proposal Submitted', 'Under Review', 'Approved & Supervised', 'In Progress'];
+        $step_map = [
             'formed'       => 0,
             'under_review' => 1,
             'approved'     => 3,
             'rejected'     => 0,
         ];
-        $step_map   = $group_workflow === 'direct_proposal' ? $step_map_direct : $step_map_topic_first;
         $active_idx = $step_map[$group_status] ?? 0;
-        if ($project && ($project['status'] ?? '') === 'in_progress') $active_idx = count($steps) - 1;
+        if ($project && ($project['status'] ?? '') === 'in_progress') $active_idx = 4;
         ?>
         <div class="d-flex align-items-center gap-1 flex-wrap">
             <?php foreach ($steps as $i => $step): ?>
-                <span class="badge <?= $i <= $active_idx ? 'bg-primary' : 'bg-light text-muted border' ?> px-2 py-1" style="font-size:.8em;"><?= e($step) ?></span>
+                <span class="badge <?= $i <= $active_idx ? 'bg-primary' : 'bg-secondary opacity-50' ?> px-2 py-1" style="font-size:.8em;"><?= e($step) ?></span>
                 <?php if ($i < count($steps) - 1): ?>
                     <i class="bi bi-chevron-right text-muted" style="font-size:.75em;"></i>
                 <?php endif; ?>
@@ -360,26 +307,16 @@ require_once __DIR__ . '/../includes/header.php';
 <?php endif; ?>
 
 <!-- Submission Form -->
-<?php if ($can_submit_topic || $can_submit_proposal): ?>
+<?php if ($can_submit): ?>
     <div class="card">
         <div class="card-header">
-            <i class="bi bi-send me-1"></i>
-            <?php if ($can_submit_proposal): ?>
-                Submit Project Proposal
-            <?php else: ?>
-                Submit Project Topic
-            <?php endif; ?>
+            <i class="bi bi-send me-1"></i> Submit Project Topic &amp; Proposal
         </div>
         <div class="card-body">
-            <?php if ($can_submit_topic && $group_workflow === 'topic_first' && empty($latest_sub)): ?>
-                <div class="alert alert-info py-2 mb-3">
-                    <strong>Step 1 of 2:</strong> Submit your project topic for HOD approval.
-                    Once approved, you will be able to submit your full proposal.
-                </div>
-            <?php elseif ($can_submit_proposal && $group_workflow === 'topic_first'): ?>
-                <div class="alert alert-success py-2 mb-3">
-                    <i class="bi bi-check-circle me-1"></i>
-                    <strong>Topic approved!</strong> Now submit your full project proposal.
+            <?php if (!empty($latest_sub) && $latest_sub['status'] === 'rejected'): ?>
+                <div class="alert alert-warning py-2 mb-3">
+                    <i class="bi bi-arrow-clockwise me-1"></i>
+                    <strong>Submission rejected.</strong> Revise and resubmit below.
                 </div>
             <?php endif; ?>
 
@@ -387,9 +324,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <?= csrf_field() ?>
 
                 <div class="col-12">
-                    <label class="form-label fw-semibold">
-                        Project Title <span class="text-danger">*</span>
-                    </label>
+                    <label class="form-label fw-semibold">Project Title <span class="text-danger">*</span></label>
                     <input type="text" name="title" class="form-control" required
                            value="<?= e($_POST['title'] ?? ($latest_sub['title'] ?? '')) ?>"
                            placeholder="Enter a clear and descriptive project title">
@@ -400,30 +335,18 @@ require_once __DIR__ . '/../includes/header.php';
                     <input type="text" name="keywords" class="form-control"
                            value="<?= e($_POST['keywords'] ?? ($latest_sub['keywords'] ?? '')) ?>"
                            placeholder="e.g. machine learning, health, IoT (comma-separated)">
-                    <div class="form-text">Helps the HOD detect similar existing projects.</div>
+                    <div class="form-text text-white-50">Helps the HOD detect similar existing projects.</div>
                 </div>
 
-                <div class="col-12">
-                    <label class="form-label fw-semibold">
-                        Abstract / Description <?= $can_submit_proposal ? '<span class="text-danger">*</span>' : '' ?>
-                    </label>
-                    <textarea name="abstract" class="form-control" rows="5"
-                              placeholder="Briefly describe your project — problem statement, objectives, methodology, and expected outcomes."
-                              <?= $can_submit_proposal ? 'required' : '' ?>><?= e($_POST['abstract'] ?? ($latest_sub['abstract'] ?? '')) ?></textarea>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Proposal Document <span class="text-white-50 fw-normal">(optional)</span></label>
+                    <input type="file" name="document" class="form-control" accept=".pdf,.doc,.docx">
+                    <div class="form-text text-white-50">PDF, DOC or DOCX — max 15 MB.</div>
                 </div>
-
-                <?php if ($can_submit_proposal): ?>
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold">Proposal Document <span class="text-muted">(optional)</span></label>
-                        <input type="file" name="document" class="form-control" accept=".pdf,.doc,.docx">
-                        <div class="form-text">PDF, DOC or DOCX — max 15 MB.</div>
-                    </div>
-                <?php endif; ?>
 
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-send me-1"></i>
-                        Submit <?= $can_submit_proposal ? 'Proposal' : 'Topic' ?>
+                        <i class="bi bi-send me-1"></i> Submit Topic &amp; Proposal
                     </button>
                 </div>
             </form>
@@ -435,12 +358,6 @@ require_once __DIR__ . '/../includes/header.php';
         <i class="bi bi-hourglass-split me-1"></i>
         <strong>Your submission is under review.</strong>
         The HOD will review it and notify you of the decision. No further action is required right now.
-    </div>
-
-<?php elseif ($group_status === 'approved' && $group_workflow === 'topic_first' && !empty($proposal_already_submitted)): ?>
-    <div class="alert alert-info">
-        <i class="bi bi-hourglass-split me-1"></i>
-        Your proposal is submitted and under review or already approved.
     </div>
 <?php endif; ?>
 

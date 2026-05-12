@@ -44,13 +44,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     }
 }
 
-$stmt = $pdo->prepare('SELECT email, full_name, role, department, reg_number, phone, created_at FROM users WHERE id = ?');
+$stmt = $pdo->prepare('SELECT email, full_name, role, department, index_number, phone, created_at FROM users WHERE id = ?');
 $stmt->execute([$uid]);
 $profile = $stmt->fetch();
 [$first_name, $last_name] = split_profile_name((string) ($profile['full_name'] ?? ''));
 $profile_role = (string) ($profile['role'] ?? $user['role'] ?? 'student');
 $is_student = $profile_role === 'student';
-$student_id_display = (string) ($profile['reg_number'] ?: $uid);
+$student_id_display = (string) ($profile['index_number'] ?: $uid);
 $department_display = get_department_display_name($pdo, $profile['department'] ?? '');
 
 $role_label_map = [
@@ -124,7 +124,7 @@ require_once __DIR__ . '/includes/header.php';
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="index_number">Index Number</label>
-                            <input type="text" class="form-control" id="index_number" value="<?= e($profile['reg_number'] ?? '—') ?>" readonly>
+                            <input type="text" class="form-control" id="index_number" value="<?= e($profile['index_number'] ?? '—') ?>" readonly>
                         </div>
                         <?php endif; ?>
                         <div class="col-md-6">

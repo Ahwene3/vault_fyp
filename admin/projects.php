@@ -57,10 +57,10 @@ $sql = 'SELECT
     p.group_id,
     COALESCE(g.name, CONCAT("Solo Vault - ", lead_u.full_name)) AS vault_name,
     lead_u.full_name AS lead_name,
-    lead_u.reg_number AS lead_reg_number,
+    lead_u.index_number AS lead_index_number,
     lead_u.email AS lead_email,
     sup_u.full_name AS supervisor_name,
-    (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+    (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
         FROM `group_members` gm2
         JOIN users u2 ON u2.id = gm2.student_id
         WHERE gm2.group_id = p.group_id) AS member_directory'
@@ -74,7 +74,7 @@ $sql = 'SELECT
 $params = [];
 
 if ($q !== '') {
-    $sql .= ' AND (p.title LIKE ? OR lead_u.full_name LIKE ? OR lead_u.reg_number LIKE ? OR sup_u.full_name LIKE ? OR g.name LIKE ?)';
+    $sql .= ' AND (p.title LIKE ? OR lead_u.full_name LIKE ? OR lead_u.index_number LIKE ? OR sup_u.full_name LIKE ? OR g.name LIKE ?)';
     $term = '%' . $q . '%';
     $params = [$term, $term, $term, $term, $term];
 }
@@ -186,7 +186,7 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php
                                 $member_text = !empty($project['group_id'])
                                     ? ($project['member_directory'] ?: '—')
-                                    : (($project['lead_name'] ?? '—') . ' (' . (($project['lead_reg_number'] ?: $project['lead_email']) ?: '—') . ')');
+                                    : (($project['lead_name'] ?? '—') . ' (' . (($project['lead_index_number'] ?: $project['lead_email']) ?: '—') . ')');
                                 $badge_class = $status_badges[$project['status']] ?? 'bg-secondary';
                             ?>
                             <tr>

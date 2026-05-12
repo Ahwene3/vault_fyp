@@ -1,0 +1,6 @@
+Full Name	Email Address	Role	Department	Employee/Staff ID	Index Number	Level	Password
+Dr. Kofi Asante	kofi.asante@rmu.edu	supervisor	ICT Department	ICT-SUP-001			
+Ms. Abena Mensah	abena.mensah@rmu.edu	supervisor	ICT Department	ICT-SUP-002			
+Emmanuel Tetteh	emmanuel.tetteh@rmu.edu	student	ICT Department		ICT/2021/001	300	
+Akosua Boateng	akosua.boateng@rmu.edu	student	ICT Department		ICT/2021/002	300	
+Kwame Darko	kwame.darko@rmu.edu	student	ICT Department		ICT/2022/001	200	

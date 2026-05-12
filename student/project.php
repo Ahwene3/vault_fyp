@@ -100,7 +100,7 @@ $is_archived = !empty($project) && ($project['status'] ?? '') === 'archived';
 $error = '';
 $success = '';
 
-// Submit new topic or update draft (with optional proposal document)
+// Handle draft/rejected resubmit and document uploads
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     if ($is_archived) {
         flash('error', 'This project is archived and cannot be modified.');
@@ -110,11 +110,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     $title = trim($_POST['title'] ?? '');
     $keywords = trim($_POST['keywords'] ?? '');
 
-    if ($action === 'submit_topic') {
+    if ($action === 'submit_topic' && $project && in_array($project['status'], ['draft', 'rejected'], true)) {
         if (strlen($title) < 10) {
             $error = 'Project title must be at least 10 characters.';
         } else {
-            // Handle optional proposal file upload
             $proposal_file = null;
             if (!empty($_FILES['proposal_file']['name'])) {
                 $file = $_FILES['proposal_file'];
@@ -138,30 +137,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                 try {
                     $pdo->beginTransaction();
 
-                    if ($project && in_array($project['status'], ['draft', 'rejected'], true)) {
-                        if ($group_id && (int) ($project['group_id'] ?? 0) === $group_id) {
-                            $stmt = $pdo->prepare('UPDATE projects SET title = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND group_id = ?');
-                            $stmt->execute([$title, $keywords ?: null, $project['id'], $group_id]);
-                        } else {
-                            $stmt = $pdo->prepare('UPDATE projects SET title = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND student_id = ?');
-                            $stmt->execute([$title, $keywords ?: null, $project['id'], $uid]);
-                        }
-                        $project_id = $project['id'];
+                    if ($group_id && (int) ($project['group_id'] ?? 0) === $group_id) {
+                        $stmt = $pdo->prepare('UPDATE projects SET title = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND group_id = ?');
+                        $stmt->execute([$title, $keywords ?: null, $project['id'], $group_id]);
                     } else {
-                        if ($group_id) {
-                            $stmt = $pdo->prepare('SELECT student_id FROM `group_members` WHERE group_id = ? ORDER BY CASE WHEN role = "lead" THEN 0 ELSE 1 END, id ASC LIMIT 1');
-                            $stmt->execute([$group_id]);
-                            $group_owner = (int) ($stmt->fetchColumn() ?: $uid);
-                            $stmt = $pdo->prepare('INSERT INTO projects (student_id, group_id, title, keywords, status, submitted_at) VALUES (?, ?, ?, ?, "submitted", NOW())');
-                            $stmt->execute([$group_owner, $group_id, $title, $keywords ?: null]);
-                        } else {
-                            $stmt = $pdo->prepare('INSERT INTO projects (student_id, title, keywords, status, submitted_at) VALUES (?, ?, ?, "submitted", NOW())');
-                            $stmt->execute([$uid, $title, $keywords ?: null]);
-                        }
-                        $project_id = (int) $pdo->lastInsertId();
+                        $stmt = $pdo->prepare('UPDATE projects SET title = ?, keywords = ?, status = "submitted", submitted_at = NOW() WHERE id = ? AND student_id = ?');
+                        $stmt->execute([$title, $keywords ?: null, $project['id'], $uid]);
                     }
+                    $project_id = $project['id'];
 
-                    // Upload proposal file if provided
                     if ($proposal_file) {
                         $upload_dir = dirname(__DIR__) . '/uploads/projects/' . $project_id;
                         if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
@@ -174,10 +158,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                             $rel = 'projects/' . $project_id . '/' . $safe_name;
                             $detected_mime = (new finfo(FILEINFO_MIME_TYPE))->file($path);
 
-                            // Mark previous proposals as not latest
                             $pdo->prepare('UPDATE project_documents SET is_latest = 0 WHERE project_id = ? AND document_type = ? AND is_latest = 1')->execute([$project_id, 'proposal']);
 
-                            // Insert proposal document
                             $stmt = $pdo->prepare('INSERT INTO project_documents (project_id, document_type, file_name, file_path, file_size, mime_type, uploader_id, version_number, is_latest) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)');
                             $stmt->execute([$project_id, 'proposal', $proposal_file['name'], $rel, $proposal_file['size'], $detected_mime, $uid]);
                         } else {
@@ -186,16 +168,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     }
 
                     $pdo->commit();
-                    flash('success', 'Project topic submitted for approval.' . ($proposal_file ? ' Proposal document uploaded.' : ''));
+                    flash('success', 'Project resubmitted for approval.' . ($proposal_file ? ' Proposal document uploaded.' : ''));
                     redirect(base_url('student/project.php'));
                 } catch (Throwable $e) {
-                    if ($pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    if ($proposal_file && isset($path) && is_file($path)) {
-                        unlink($path);
-                    }
-                    $error = 'Unable to submit project. Please try again.';
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    if ($proposal_file && isset($path) && is_file($path)) unlink($path);
+                    $error = 'Unable to resubmit project. Please try again.';
                 }
             }
         }
@@ -391,33 +369,14 @@ require_once __DIR__ . '/../includes/header.php';
 <?php endif; ?>
 
 <?php if (!$project): ?>
-    <div class="card">
-        <div class="card-header">Submit Project Topic</div>
+    <div class="card text-center py-5">
         <div class="card-body">
-            <p class="text-muted">Submit your final year project topic for approval.</p>
-            <?php if ($error): ?><div class="alert alert-danger"><?= e($error) ?></div><?php endif; ?>
-            <form method="post" enctype="multipart/form-data">
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="submit_topic">
-                <div class="row g-3">
-                    <div class="col-12">
-                        <label class="form-label" for="title">Project Title <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="title" name="title" required minlength="10" placeholder="Enter your project title (min 10 characters)" value="<?= e($_POST['title'] ?? '') ?>">
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label" for="proposal_file">Proposal Document <span class="text-muted">(Recommended)</span></label>
-                        <input type="file" class="form-control" id="proposal_file" name="proposal_file" accept=".pdf,.doc,.docx">
-                        <small class="d-block text-muted mt-2"><i class="bi bi-info-circle"></i> Upload your proposal document (PDF, DOCX, or DOC). Max file size: 15MB</small>
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label" for="keywords">Keywords <small class="text-muted">(comma-separated, e.g. machine learning, IoT, blockchain)</small></label>
-                        <input type="text" class="form-control" id="keywords" name="keywords" placeholder="keyword1, keyword2, keyword3" value="<?= e($_POST['keywords'] ?? '') ?>">
-                    </div>
-                    <div class="col-12">
-                        <button type="submit" class="btn btn-primary">Submit for Approval</button>
-                    </div>
-                </div>
-            </form>
+            <div class="mb-3"><i class="bi bi-send-fill fs-1 text-primary opacity-75"></i></div>
+            <h5 class="card-title mb-2">No Project Submitted Yet</h5>
+            <p class="text-muted mb-4">You haven't submitted a project topic. Head to the submission page to get started.</p>
+            <a href="<?= base_url('student/submit_topic.php') ?>" class="btn btn-primary px-4">
+                <i class="bi bi-send me-1"></i> Submit Project Topic
+            </a>
         </div>
     </div>
 <?php else: ?>

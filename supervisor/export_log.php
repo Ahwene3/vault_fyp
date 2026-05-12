@@ -10,7 +10,7 @@ $pdo = getPDO();
 ensure_supervisor_logsheets_table($pdo);
 $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
 
-$stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.reg_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND (p.supervisor_id = ? OR p.status = "archived")');
+$stmt = $pdo->prepare('SELECT p.*, u.full_name AS student_name, u.email, u.index_number FROM projects p JOIN users u ON p.student_id = u.id WHERE p.id = ? AND (p.supervisor_id = ? OR p.status = "archived")');
 $stmt->execute([$pid, $uid]);
 $project = $stmt->fetch();
 if (!$project) {
@@ -21,7 +21,7 @@ if (!$project) {
 // Fetch all group members (for group projects)
 $group_members = [];
 if (!empty($project['group_id'])) {
-    $stmt = $pdo->prepare('SELECT u.full_name, u.reg_number, u.email, gm.role AS group_role FROM `group_members` gm JOIN users u ON u.id = gm.student_id WHERE gm.group_id = ? ORDER BY CASE WHEN gm.role = "lead" THEN 0 ELSE 1 END, u.full_name');
+    $stmt = $pdo->prepare('SELECT u.full_name, u.index_number, u.email, gm.role AS group_role FROM `group_members` gm JOIN users u ON u.id = gm.student_id WHERE gm.group_id = ? ORDER BY CASE WHEN gm.role = "lead" THEN 0 ELSE 1 END, u.full_name');
     $stmt->execute([(int) $project['group_id']]);
     $group_members = $stmt->fetchAll();
 }
@@ -29,7 +29,7 @@ if (!empty($project['group_id'])) {
 if (empty($group_members)) {
     $group_members = [[
         'full_name'  => $project['student_name'],
-        'reg_number' => $project['reg_number'],
+        'index_number' => $project['index_number'],
         'email'      => $project['email'],
         'group_role' => 'lead',
     ]];
@@ -91,7 +91,7 @@ if ($format === 'pdf') {
         <p><strong>Project:</strong> <?= e($project['title']) ?></p>
         <p><strong>Student(s):</strong>
             <?php foreach ($group_members as $i => $m): ?>
-                <?= e($m['full_name']) ?> (<?= e($m['reg_number'] ?? 'N/A') ?>)<?= $m['group_role'] === 'lead' ? ' <em>[Lead]</em>' : '' ?><?= $i < count($group_members) - 1 ? ', ' : '' ?>
+                <?= e($m['full_name']) ?> (<?= e($m['index_number'] ?? 'N/A') ?>)<?= $m['group_role'] === 'lead' ? ' <em>[Lead]</em>' : '' ?><?= $i < count($group_members) - 1 ? ', ' : '' ?>
             <?php endforeach; ?>
         </p>
         <p><strong>Supervisor:</strong> <?= e($_SESSION['user']['full_name'] ?? 'Unknown') ?></p>

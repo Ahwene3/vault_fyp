@@ -74,7 +74,7 @@ function regenerate_session(): void {
 function get_user_by_id(int $id): ?array {
     $pdo = getPDO();
     ensure_user_archive_columns($pdo);
-    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, reg_number, phone, is_active, archived_permanent, archived_at, archived_by, created_at FROM users WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, index_number, phone, is_active, archived_permanent, archived_at, archived_by, created_at FROM users WHERE id = ?');
     $stmt->execute([$id]);
     $u = $stmt->fetch();
     return $u ?: null;

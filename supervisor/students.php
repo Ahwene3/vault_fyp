@@ -20,13 +20,13 @@ foreach ($stmt->fetchAll() as $candidate) {
     }
 }
 
-$stmt = $pdo->prepare('SELECT p.id, p.title, p.status, p.submitted_at, p.group_id, u.id AS student_id, u.full_name AS student_name, u.email, u.reg_number, g.name AS group_name,
+$stmt = $pdo->prepare('SELECT p.id, p.title, p.status, p.submitted_at, p.group_id, u.id AS student_id, u.full_name AS student_name, u.email, u.index_number, g.name AS group_name,
     (SELECT COUNT(*) FROM `group_members` gm WHERE gm.group_id = p.group_id) AS group_size,
     (SELECT GROUP_CONCAT(u2.full_name ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
         FROM `group_members` gm2
         JOIN users u2 ON u2.id = gm2.student_id
         WHERE gm2.group_id = p.group_id) AS group_member_names,
-    (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+    (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
         FROM `group_members` gm2
         JOIN users u2 ON u2.id = gm2.student_id
         WHERE gm2.group_id = p.group_id) AS group_member_directory,
@@ -95,7 +95,7 @@ require_once __DIR__ . '/../includes/header.php';
                                         <?php if (!empty($s['group_id'])): ?>
                                             <small><?= e($s['group_member_directory'] ?: '—') ?></small>
                                         <?php else: ?>
-                                            <?= e(($s['student_name'] ?? '—') . ' (' . ($s['reg_number'] ?: $s['email']) . ')') ?>
+                                            <?= e(($s['student_name'] ?? '—') . ' (' . ($s['index_number'] ?: $s['email']) . ')') ?>
                                         <?php endif; ?>
                                     </td>
                                     <td class="supervisor-project-title"><?= e($s['title']) ?></td>

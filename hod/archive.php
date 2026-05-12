@@ -22,7 +22,7 @@ if (isset($_GET['export'], $_GET['pid']) && !empty($hod_department_variants)) {
     $export_type = $_GET['export'];
 
     $dept_ph = sql_placeholders(count($hod_department_variants));
-    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, u.full_name AS student_name, u.reg_number, sup.full_name AS supervisor_name FROM projects p JOIN users u ON p.student_id = u.id LEFT JOIN users sup ON sup.id = p.supervisor_id WHERE p.id = ? AND LOWER(TRIM(COALESCE(u.department, ""))) IN (' . $dept_ph . ') LIMIT 1');
+    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, u.full_name AS student_name, u.index_number, sup.full_name AS supervisor_name FROM projects p JOIN users u ON p.student_id = u.id LEFT JOIN users sup ON sup.id = p.supervisor_id WHERE p.id = ? AND LOWER(TRIM(COALESCE(u.department, ""))) IN (' . $dept_ph . ') LIMIT 1');
     $stmt->execute(array_merge([$export_pid], $hod_department_variants));
     $export_project = $stmt->fetch();
 
@@ -45,7 +45,7 @@ if (isset($_GET['export'], $_GET['pid']) && !empty($hod_department_variants)) {
         echo '</head><body>';
         echo '<h1>Supervisor Logsheet</h1>';
         echo '<div class="meta"><p><strong>Project:</strong> ' . htmlspecialchars($export_project['title']) . '</p>';
-        echo '<p><strong>Student:</strong> ' . htmlspecialchars($export_project['student_name']) . ' (' . htmlspecialchars($export_project['reg_number'] ?? '') . ')</p>';
+        echo '<p><strong>Student:</strong> ' . htmlspecialchars($export_project['student_name']) . ' (' . htmlspecialchars($export_project['index_number'] ?? '') . ')</p>';
         echo '<p><strong>Supervisor:</strong> ' . htmlspecialchars($export_project['supervisor_name'] ?? 'N/A') . '</p>';
         echo '<p><strong>Generated:</strong> ' . date('M j, Y H:i') . '</p></div>';
         if (empty($logsheets)) {
@@ -88,7 +88,7 @@ if (isset($_GET['export'], $_GET['pid']) && !empty($hod_department_variants)) {
         echo '</head><body>';
         echo '<h1>Supervisor Assessment Records</h1>';
         echo '<div class="meta"><p><strong>Project:</strong> ' . htmlspecialchars($export_project['title']) . '</p>';
-        echo '<p><strong>Student:</strong> ' . htmlspecialchars($export_project['student_name']) . ' (' . htmlspecialchars($export_project['reg_number'] ?? '') . ')</p>';
+        echo '<p><strong>Student:</strong> ' . htmlspecialchars($export_project['student_name']) . ' (' . htmlspecialchars($export_project['index_number'] ?? '') . ')</p>';
         echo '<p><strong>Supervisor:</strong> ' . htmlspecialchars($export_project['supervisor_name'] ?? 'N/A') . '</p>';
         echo '<p><strong>Generated:</strong> ' . date('M j, Y H:i') . '</p></div>';
         if (empty($assessments_export)) {
@@ -135,13 +135,13 @@ function hod_get_member_ids(PDO $pdo, array $project): array {
     return array_values(array_unique(array_filter($ids)));
 }
 
-$member_dir_subquery = '(SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ") FROM `group_members` gm2 JOIN users u2 ON u2.id = gm2.student_id WHERE gm2.group_id = p.group_id) AS member_directory';
+$member_dir_subquery = '(SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ") FROM `group_members` gm2 JOIN users u2 ON u2.id = gm2.student_id WHERE gm2.group_id = p.group_id) AS member_directory';
 
 $pending_review = [];
 if (!empty($hod_department_variants)) {
     $dept_ph = sql_placeholders(count($hod_department_variants));
     $sql = 'SELECT p.id, p.title, p.updated_at, p.group_id, p.student_id,
-        u.full_name AS student_name, u.reg_number, u.email,
+        u.full_name AS student_name, u.index_number, u.email,
         sup.full_name AS supervisor_name, g.name AS group_name,
         ' . $member_dir_subquery . ',
         (SELECT COUNT(*) FROM supervisor_logsheets sl WHERE sl.project_id = p.id) AS logsheet_count,
@@ -163,7 +163,7 @@ $completable = [];
 if (!empty($hod_department_variants)) {
     $dept_ph = sql_placeholders(count($hod_department_variants));
     $sql = 'SELECT p.id, p.title, p.status, p.group_id, p.student_id,
-        u.full_name AS student_name, u.reg_number, u.email,
+        u.full_name AS student_name, u.index_number, u.email,
         sup.full_name AS supervisor_name, g.name AS group_name,
         ' . $member_dir_subquery . ',
         (SELECT COUNT(*) FROM project_documents pd WHERE pd.project_id = p.id) AS docs_count,
@@ -259,7 +259,7 @@ $archived = [];
 if (!empty($hod_department_variants)) {
     $dept_ph = sql_placeholders(count($hod_department_variants));
     $sql = 'SELECT p.id, p.title, p.updated_at, p.group_id,
-        u.full_name AS student_name, u.reg_number, u.email,
+        u.full_name AS student_name, u.index_number, u.email,
         sup.full_name AS supervisor_name, g.name AS group_name,
         ' . $member_dir_subquery . ',
         (SELECT COUNT(*) FROM project_documents pd WHERE pd.project_id = p.id) AS docs_count,
@@ -314,7 +314,7 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php if (!empty($p['group_id'])): ?>
                                 <small><?= e($p['member_directory'] ?: '—') ?></small>
                             <?php else: ?>
-                                <?= e(($p['student_name'] ?? '—') . ' (' . ($p['reg_number'] ?: $p['email']) . ')') ?>
+                                <?= e(($p['student_name'] ?? '—') . ' (' . ($p['index_number'] ?: $p['email']) . ')') ?>
                             <?php endif; ?>
                         </td>
                         <td class="fw-semibold"><?= e($p['title']) ?></td>
@@ -376,7 +376,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <?php if (!empty($p['group_id'])): ?>
                                     <small><?= e($p['member_directory'] ?: '—') ?></small>
                                 <?php else: ?>
-                                    <?= e(($p['student_name'] ?? '—') . ' (' . ($p['reg_number'] ?: $p['email']) . ')') ?>
+                                    <?= e(($p['student_name'] ?? '—') . ' (' . ($p['index_number'] ?: $p['email']) . ')') ?>
                                 <?php endif; ?>
                             </td>
                             <td><?= e($p['title']) ?></td>
@@ -433,7 +433,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <?php if (!empty($p['group_id'])): ?>
                                     <small><?= e($p['member_directory'] ?: '—') ?></small>
                                 <?php else: ?>
-                                    <?= e(($p['student_name'] ?? '—') . ' (' . ($p['reg_number'] ?: $p['email']) . ')') ?>
+                                    <?= e(($p['student_name'] ?? '—') . ' (' . ($p['index_number'] ?: $p['email']) . ')') ?>
                                 <?php endif; ?>
                             </td>
                             <td><?= e($p['title']) ?></td>

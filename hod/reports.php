@@ -90,7 +90,7 @@ if (!empty($hod_department_variants)) {
     $supervisor_workload = $stmt->fetchAll();
 
     $stmt = $pdo->prepare('SELECT p.title, COUNT(*) AS count,
-        GROUP_CONCAT(CASE WHEN p.group_id IS NULL THEN CONCAT(u.full_name, " (", COALESCE(NULLIF(u.reg_number, ""), u.email), ")") ELSE CONCAT(COALESCE(g.name, CONCAT("Group #", p.group_id)), " [Lead: ", u.full_name, "]") END SEPARATOR "; ") AS vaults
+        GROUP_CONCAT(CASE WHEN p.group_id IS NULL THEN CONCAT(u.full_name, " (", COALESCE(NULLIF(u.index_number, ""), u.email), ")") ELSE CONCAT(COALESCE(g.name, CONCAT("Group #", p.group_id)), " [Lead: ", u.full_name, "]") END SEPARATOR "; ") AS vaults
         FROM projects p
         JOIN users u ON p.student_id = u.id
         LEFT JOIN `groups` g ON g.id = p.group_id
@@ -112,8 +112,8 @@ if (!empty($hod_department_variants)) {
     $stmt->execute($params);
     $monthly_submissions = $stmt->fetchAll();
 
-    $stmt = $pdo->prepare('SELECT p.id, p.title, p.group_id, u.full_name, u.email, u.reg_number, p.submitted_at, g.name AS group_name,
-        (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+    $stmt = $pdo->prepare('SELECT p.id, p.title, p.group_id, u.full_name, u.email, u.index_number, p.submitted_at, g.name AS group_name,
+        (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
             FROM `group_members` gm2
             JOIN users u2 ON u2.id = gm2.student_id
             WHERE gm2.group_id = p.group_id) AS member_directory,
@@ -133,7 +133,7 @@ if (!empty($hod_department_variants)) {
         p.title,
         COALESCE(g.name, CONCAT("Solo Vault - ", lead_u.full_name)) AS vault_name,
         member_u.full_name AS member_name,
-        COALESCE(NULLIF(member_u.reg_number, ""), member_u.email) AS member_index,
+        COALESCE(NULLIF(member_u.index_number, ""), member_u.email) AS member_index,
         sup_u.full_name AS supervisor_name,
         (SELECT COUNT(*) FROM project_documents pd WHERE pd.project_id = p.id AND pd.uploader_id = member_u.id) AS docs_uploaded,
         (SELECT COUNT(*) FROM logbook_entries le WHERE le.project_id = p.id AND le.created_by = member_u.id) AS logbook_entries,
@@ -178,7 +178,7 @@ if (!empty($hod_department_variants)) {
         p.updated_at,
         COALESCE(g.name, CONCAT("Solo Vault - ", lead_u.full_name)) AS vault_name,
         sup_u.full_name AS supervisor_name,
-        (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+        (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
             FROM `group_members` gm2
             JOIN users u2 ON u2.id = gm2.student_id
             WHERE gm2.group_id = p.group_id) AS member_directory
@@ -360,7 +360,7 @@ if ($export_format !== '') {
                             <?php
                             $vault_label = !empty($p['group_id'])
                                 ? ('Group: ' . ($p['group_name'] ?: ('#' . $p['group_id'])))
-                                : ('Solo: ' . ($p['full_name'] ?? '-') . ' (' . ($p['reg_number'] ?? $p['email']) . ')');
+                                : ('Solo: ' . ($p['full_name'] ?? '-') . ' (' . ($p['index_number'] ?? $p['email']) . ')');
                             ?>
                             <tr>
                                 <td><?= e($p['title']) ?></td>
@@ -616,7 +616,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 <small class="text-muted d-block">Group Vault: <?= e($p['group_name'] ?: ('#' . $p['group_id'])) ?></small>
                                 <small class="text-muted d-block">Members: <?= e($p['member_directory'] ?: '—') ?></small>
                             <?php else: ?>
-                                <small class="text-muted d-block">Solo Vault: <?= e(($p['full_name'] ?? '—') . ' (' . ($p['reg_number'] ?? $p['email']) . ')') ?></small>
+                                <small class="text-muted d-block">Solo Vault: <?= e(($p['full_name'] ?? '—') . ' (' . ($p['index_number'] ?? $p['email']) . ')') ?></small>
                             <?php endif; ?>
                             <small class="text-muted">
                                 Input: Docs <?= (int) ($p['docs_count'] ?? 0) ?> | Logbook <?= (int) ($p['logbook_count'] ?? 0) ?> | Messages <?= (int) ($p['message_count'] ?? 0) ?> |

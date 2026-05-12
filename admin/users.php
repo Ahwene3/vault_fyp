@@ -78,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
             $role = $_POST['role'] ?? 'supervisor';
             $department = trim($_POST['department'] ?? '');
             $department_info = resolve_department_info($pdo, $department);
-            $reg_number = trim($_POST['reg_number'] ?? '');
+            $index_number = trim($_POST['index_number'] ?? '');
             $phone = trim($_POST['phone'] ?? '');
             $new_password = $_POST['new_password'] ?? '';
 
@@ -120,13 +120,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                 $department_to_store = $department_info['id'] !== null ? (string) $department_info['id'] : $department;
             }
 
-            $pdo->prepare('UPDATE users SET full_name = ?, email = ?, role = ?, department = ?, reg_number = ?, phone = ? WHERE id = ?')
+            $pdo->prepare('UPDATE users SET full_name = ?, email = ?, role = ?, department = ?, index_number = ?, phone = ? WHERE id = ?')
                 ->execute([
                     $full_name,
                     $email,
                     $role,
                     $department_to_store,
-                    $reg_number ?: null,
+                    $index_number ?: null,
                     $phone ?: null,
                     $target_id,
                 ]);
@@ -150,14 +150,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
     $department = trim($_POST['department'] ?? '');
     $department_info = resolve_department_info($pdo, $department);
     $password = $_POST['password'] ?? '';
-    $reg_number = trim($_POST['reg_number'] ?? '');
+    $index_number = trim($_POST['index_number'] ?? '');
     $level = trim($_POST['level'] ?? '');
 
     if (!$email || !$full_name || !$password) {
         $add_error = 'Fill all fields.';
     } elseif (!in_array($role, ['student', 'supervisor', 'hod', 'admin'], true)) {
         $add_error = 'Invalid role.';
-    } elseif ($role === 'student' && !$reg_number) {
+    } elseif ($role === 'student' && !$index_number) {
         $add_error = 'Index number is required for students.';
     } elseif (in_array($role, ['supervisor', 'hod'], true) && empty($department_info['variants'])) {
         $add_error = 'A valid department is required for supervisors and HODs.';
@@ -169,8 +169,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
         if ($stmt->fetch()) {
             $add_error = 'Email already in use.';
         } else {
-            $stmt2 = $pdo->prepare('SELECT id FROM users WHERE reg_number = ?');
-            $stmt2->execute([$reg_number]);
+            $stmt2 = $pdo->prepare('SELECT id FROM users WHERE index_number = ?');
+            $stmt2->execute([$index_number]);
             if ($role === 'student' && $stmt2->fetch()) {
                 $add_error = 'An account with this index number already exists.';
             } else {
@@ -179,8 +179,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
                 if ($department !== '') {
                     $department_to_store = $department_info['id'] !== null ? (string) $department_info['id'] : $department;
                 }
-                $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department, reg_number, level) VALUES (?, ?, ?, ?, ?, ?, ?)')
-                    ->execute([$email, $hash, $full_name, $role, $department_to_store, $reg_number ?: null, $level ?: null]);
+                $pdo->prepare('INSERT INTO users (email, password_hash, full_name, role, department, index_number, level) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$email, $hash, $full_name, $role, $department_to_store, $index_number ?: null, $level ?: null]);
                 flash('success', 'User added.');
                 redirect(base_url('admin/users.php'));
             }
@@ -191,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && ($_POST['action'] 
 $edit_id = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
 $edit_user = null;
 if ($edit_id > 0) {
-    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, reg_number, phone, is_active FROM users WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT id, email, full_name, role, department, index_number, phone, is_active FROM users WHERE id = ?');
     $stmt->execute([$edit_id]);
     $edit_user = $stmt->fetch();
 }
@@ -249,8 +249,8 @@ if ($edit_user) {
     }
 }
 
-$active_users = $pdo->query('SELECT id, email, full_name, role, department, reg_number, phone, is_active, created_at FROM users WHERE is_active = 1 ORDER BY role, full_name')->fetchAll();
-$archived_users = $pdo->query('SELECT u.id, u.email, u.full_name, u.role, u.department, u.reg_number, u.phone, u.is_active, u.archived_permanent, u.archived_at, u.archived_by, u.created_at, ab.full_name AS archived_by_name FROM users u LEFT JOIN users ab ON ab.id = u.archived_by WHERE u.is_active = 0 ORDER BY COALESCE(u.archived_at, u.created_at) DESC, u.full_name')->fetchAll();
+$active_users = $pdo->query('SELECT id, email, full_name, role, department, index_number, phone, is_active, created_at FROM users WHERE is_active = 1 ORDER BY role, full_name')->fetchAll();
+$archived_users = $pdo->query('SELECT u.id, u.email, u.full_name, u.role, u.department, u.index_number, u.phone, u.is_active, u.archived_permanent, u.archived_at, u.archived_by, u.created_at, ab.full_name AS archived_by_name FROM users u LEFT JOIN users ab ON ab.id = u.archived_by WHERE u.is_active = 0 ORDER BY COALESCE(u.archived_at, u.created_at) DESC, u.full_name')->fetchAll();
 
 $pageTitle = 'Manage Users';
 require_once __DIR__ . '/../includes/header.php';
@@ -309,7 +309,7 @@ require_once __DIR__ . '/../includes/header.php';
             <!-- Student-only fields -->
             <div class="col-md-2" id="addIndexField" style="display:none;">
                 <label class="form-label">Index Number <span class="text-danger">*</span></label>
-                <input type="text" name="reg_number" class="form-control" placeholder="e.g. CS/2021/001" value="<?= e($_POST['reg_number'] ?? '') ?>">
+                <input type="text" name="index_number" class="form-control" placeholder="e.g. CS/2021/001" value="<?= e($_POST['index_number'] ?? '') ?>">
             </div>
             <div class="col-md-2" id="addLevelField" style="display:none;">
                 <label class="form-label">Level / Year</label>
@@ -332,7 +332,7 @@ function toggleAddUserFields() {
     document.getElementById('addIndexField').style.display = isStudent ? '' : 'none';
     document.getElementById('addLevelField').style.display = isStudent ? '' : 'none';
     document.getElementById('addDeptField').style.display = (role === 'supervisor' || role === 'hod') ? '' : 'none';
-    document.querySelector('[name="reg_number"]').required = isStudent;
+    document.querySelector('[name="index_number"]').required = isStudent;
 }
 // Apply on page load in case of POST error repopulation
 toggleAddUserFields();
@@ -424,7 +424,7 @@ toggleAddUserFields();
             </div>
             <div class="col-md-4">
                 <label class="form-label">Reg. Number</label>
-                <input type="text" name="reg_number" class="form-control" value="<?= e($edit_user['reg_number'] ?? '') ?>">
+                <input type="text" name="index_number" class="form-control" value="<?= e($edit_user['index_number'] ?? '') ?>">
             </div>
             <div class="col-md-4">
                 <label class="form-label">Phone</label>

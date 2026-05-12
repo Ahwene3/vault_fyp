@@ -17,7 +17,7 @@ if (!$project_id) {
 
 // Fetch project (must be publicly visible)
 $stmt = $pdo->prepare("SELECT p.*,
-    stu.full_name AS student_name, stu.department, stu.email AS student_email, stu.reg_number,
+    stu.full_name AS student_name, stu.department, stu.email AS student_email, stu.index_number,
     sup.full_name AS supervisor_name, sup.email AS supervisor_email
     FROM projects p
     LEFT JOIN users stu ON stu.id = p.student_id

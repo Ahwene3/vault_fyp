@@ -32,25 +32,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     if ($action === 'parse_file') {
         unset($_SESSION['hod_group_import_preview']);
 
-        $workflow      = in_array($_POST['workflow'] ?? '', ['topic_first', 'direct_proposal'], true)
-                         ? $_POST['workflow'] : 'topic_first';
+        $workflow      = 'direct_proposal';
         $academic_year = trim($_POST['academic_year'] ?? date('Y'));
         $batch_ref     = trim($_POST['batch_ref'] ?? '');
 
         if (empty($_FILES['group_file']['name'])) {
-            $errors[] = 'Select a CSV file to upload.';
+            $errors[] = 'Select a file to upload.';
         } elseif ($_FILES['group_file']['error'] !== UPLOAD_ERR_OK) {
             $errors[] = 'Upload error. Please try again.';
         } elseif ($_FILES['group_file']['size'] > 5 * 1024 * 1024) {
             $errors[] = 'File exceeds 5 MB limit.';
-        } elseif (strtolower(pathinfo($_FILES['group_file']['name'], PATHINFO_EXTENSION)) !== 'csv') {
-            $errors[] = 'Only CSV files are accepted. Download the template below.';
+        } elseif (!in_array(strtolower(pathinfo($_FILES['group_file']['name'], PATHINFO_EXTENSION)), ['csv', 'txt'], true)) {
+            $errors[] = 'Only CSV or TXT files are accepted. Download the template below.';
         } else {
-            $fp = fopen($_FILES['group_file']['tmp_name'], 'r');
-            $raw_headers = fgetcsv($fp, 0, ',');
+            // Read entire file, strip UTF-8 BOM, normalise all line endings to LF
+            $raw = file_get_contents($_FILES['group_file']['tmp_name']);
+            if (str_starts_with($raw, "\xEF\xBB\xBF")) $raw = substr($raw, 3);
+            $raw = str_replace(["\r\n", "\r"], "\n", $raw);
+
+            $fp = fopen('php://temp', 'r+');
+            fwrite($fp, $raw);
+            rewind($fp);
+            unset($raw);
+
+            // Sniff delimiter: tab-separated (Linux/Unix TSV) or comma-separated (CSV)
+            $first_line = fgets($fp);
+            rewind($fp);
+            $delimiter = substr_count($first_line, "\t") > substr_count($first_line, ',') ? "\t" : ',';
+
+            $raw_headers = fgetcsv($fp, 0, $delimiter);
 
             if (!$raw_headers) {
-                $errors[] = 'Cannot read the CSV file.';
+                $errors[] = 'Cannot read the file.';
                 fclose($fp);
             } else {
                 $headers = array_map(fn($h) => strtolower(trim((string) $h)), $raw_headers);
@@ -67,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                 $ci_gid   = $col('group id', 'group_id', 'groupid', 'group');
                 $ci_gname = $col('group name', 'group_name', 'groupname', 'team', 'team name');
                 $ci_sname = $col('student name', 'student_name', 'name', 'full name', 'full_name', 'student');
-                $ci_idx   = $col('index number', 'index_number', 'index', 'reg number', 'reg_number',
+                $ci_idx   = $col('index number', 'index_number', 'index', 'reg number', 'index_number',
                                  'registration number', 'student id', 'student_id', 'id number');
                 $ci_email = $col('email', 'student email', 'student_email', 'institutional email', 'e-mail');
 
@@ -82,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                     $valid_rows  = 0;
                     $row_num     = 2;
 
-                    while (($row = fgetcsv($fp, 0, ',')) !== false) {
+                    while (($row = fgetcsv($fp, 0, $delimiter)) !== false) {
                         if (!array_filter(array_map('trim', $row))) { $row_num++; continue; }
                         $total_rows++;
 
@@ -101,12 +114,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                         /* look up student */
                         $student = null;
                         if ($csv_idx) {
-                            $s = $pdo->prepare('SELECT id, full_name, email, reg_number, role, is_active FROM users WHERE reg_number = ? LIMIT 1');
+                            $s = $pdo->prepare('SELECT id, full_name, email, index_number, role, is_active FROM users WHERE index_number = ? LIMIT 1');
                             $s->execute([$csv_idx]);
                             $student = $s->fetch() ?: null;
                         }
                         if (!$student && $csv_email) {
-                            $s = $pdo->prepare('SELECT id, full_name, email, reg_number, role, is_active FROM users WHERE email = ? LIMIT 1');
+                            $s = $pdo->prepare('SELECT id, full_name, email, index_number, role, is_active FROM users WHERE email = ? LIMIT 1');
                             $s->execute([$csv_email]);
                             $student = $s->fetch() ?: null;
                         }
@@ -139,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                             'id'         => (int) $student['id'],
                             'full_name'  => $student['full_name'],
                             'email'      => $student['email'],
-                            'reg_number' => $student['reg_number'] ?? '',
+                            'index_number' => $student['index_number'] ?? '',
                             'is_active'  => (bool) $student['is_active'],
                         ];
                         $row_num++;
@@ -248,13 +261,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
 
 /* ─── Download CSV template ──────────────────────────────────────────────── */
 if (isset($_GET['download']) && $_GET['download'] === 'template') {
-    header('Content-Type: text/csv');
+    // Pull up to 6 real students from the HOD's department for a realistic sample
+    $sample_rows = [];
+    if (!empty($hod_dept_info['variants'])) {
+        $ph   = sql_placeholders(count($hod_dept_info['variants']));
+        $s    = $pdo->prepare(
+            "SELECT full_name, email, index_number FROM users
+             WHERE role = 'student' AND is_active = 1
+               AND LOWER(TRIM(COALESCE(department,''))) IN ($ph)
+             ORDER BY full_name LIMIT 6"
+        );
+        $s->execute($hod_dept_info['variants']);
+        $students = $s->fetchAll();
+
+        $gid = 1;
+        foreach (array_chunk($students, 3) as $chunk) {
+            $gname = 'Group ' . $gid;
+            foreach ($chunk as $stu) {
+                $sample_rows[] = [
+                    'GRP-00' . $gid,
+                    $gname,
+                    $stu['full_name'],
+                    $stu['index_number'] ?? '',
+                    $stu['email'],
+                ];
+            }
+            $gid++;
+        }
+    }
+
+    // Fall back to placeholder rows if no real students found
+    if (empty($sample_rows)) {
+        $sample_rows = [
+            ['GRP-001', 'Group 1', 'Student One',   'ICT/2021/001', 'student1@institution.edu'],
+            ['GRP-001', 'Group 1', 'Student Two',   'ICT/2021/002', 'student2@institution.edu'],
+            ['GRP-001', 'Group 1', 'Student Three', 'ICT/2021/003', 'student3@institution.edu'],
+            ['GRP-002', 'Group 2', 'Student Four',  'ICT/2022/001', 'student4@institution.edu'],
+            ['GRP-002', 'Group 2', 'Student Five',  'ICT/2022/002', 'student5@institution.edu'],
+        ];
+    }
+
+    header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="group_formation_template.csv"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
     $out = fopen('php://output', 'w');
     fputcsv($out, ['Group ID', 'Group Name', 'Student Name', 'Index Number', 'Email']);
-    fputcsv($out, ['GRP-001', 'Team Alpha', 'John Doe',   'CS/2021/001', 'john.doe@university.edu']);
-    fputcsv($out, ['GRP-001', 'Team Alpha', 'Jane Smith', 'CS/2021/002', 'jane.smith@university.edu']);
-    fputcsv($out, ['GRP-002', 'Team Beta',  'Bob Johnson','CS/2021/003', 'bob.j@university.edu']);
+    foreach ($sample_rows as $r) fputcsv($out, $r);
     fclose($out);
     exit;
 }
@@ -311,8 +364,7 @@ require_once __DIR__ . '/../includes/header.php';
             <small>
                 <?= $preview_data['total_rows'] ?> rows parsed &nbsp;|&nbsp;
                 <?= $preview_data['valid_rows'] ?> valid &nbsp;|&nbsp;
-                <?= count($preview_data['groups']) ?> group(s) &nbsp;|&nbsp;
-                Workflow: <strong><?= $preview_data['workflow'] === 'direct_proposal' ? 'Direct Proposal' : 'Topic → Proposal' ?></strong>
+                <?= count($preview_data['groups']) ?> group(s)
             </small>
         </div>
         <div class="card-body">
@@ -337,8 +389,8 @@ require_once __DIR__ . '/../includes/header.php';
                         <?php foreach ($gdata['members'] as $m): ?>
                             <span class="badge bg-light text-dark border">
                                 <?= e($m['full_name']) ?>
-                                <?php if ($m['reg_number']): ?>
-                                    <span class="text-muted">(<?= e($m['reg_number']) ?>)</span>
+                                <?php if ($m['index_number']): ?>
+                                    <span class="text-muted">(<?= e($m['index_number']) ?>)</span>
                                 <?php endif; ?>
                                 <?php if (!$m['is_active']): ?>
                                     <span class="text-warning ms-1" title="Account inactive"><i class="bi bi-exclamation-triangle-fill"></i></span>
@@ -385,18 +437,12 @@ require_once __DIR__ . '/../includes/header.php';
                 <input type="hidden" name="action" value="parse_file">
 
                 <div class="col-md-6">
-                    <label class="form-label fw-semibold">CSV File <span class="text-danger">*</span></label>
-                    <input type="file" name="group_file" class="form-control" accept=".csv" required>
-                    <div class="form-text">Required columns: <code>Group ID</code> + (<code>Index Number</code> or <code>Email</code>). Optional: <code>Group Name</code>, <code>Student Name</code>.</div>
-                </div>
-
-                <div class="col-md-3">
-                    <label class="form-label fw-semibold">Submission Workflow</label>
-                    <select name="workflow" class="form-select">
-                        <option value="topic_first">Topic → Approval → Proposal</option>
-                        <option value="direct_proposal">Direct Proposal Submission</option>
-                    </select>
-                    <div class="form-text">Applies to all groups in this import.</div>
+                    <label class="form-label fw-semibold">Group File <span class="text-danger">*</span></label>
+                    <input type="file" name="group_file" class="form-control" accept=".csv,.txt" required>
+                    <div class="form-text text-white-50">
+                        Accepts <strong>.csv</strong> (comma-separated) or <strong>.txt</strong> (tab-separated / Linux·Unix). LF and CRLF line endings both supported.<br>
+                        Required columns: <code>Group ID</code> + (<code>Index Number</code> or <code>Email</code>). Optional: <code>Group Name</code>, <code>Student Name</code>.
+                    </div>
                 </div>
 
                 <div class="col-md-2">
@@ -410,7 +456,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="col-md-4">
                     <label class="form-label fw-semibold">Batch Reference <span class="text-muted">(optional)</span></label>
                     <input type="text" name="batch_ref" class="form-control" placeholder="e.g. SEM1-2025">
-                    <div class="form-text">Helps identify re-imports of the same cohort.</div>
+                    <div class="form-text text-white-50">Helps identify re-imports of the same cohort.</div>
                 </div>
 
                 <div class="col-12">
@@ -420,13 +466,23 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
     </div>
 
-    <div class="card mb-4 bg-light border-0">
+    <div class="card mb-4">
         <div class="card-body py-3">
-            <h6 class="fw-semibold mb-2">Expected CSV format</h6>
-            <pre class="mb-1" style="font-size:.85em;">Group ID,Group Name,Student Name,Index Number,Email
-GRP-001,Team Alpha,John Doe,CS/2021/001,john.doe@university.edu
-GRP-001,Team Alpha,Jane Smith,CS/2021/002,jane.smith@university.edu
-GRP-002,Team Beta,Bob Johnson,CS/2021/003,bob.j@university.edu</pre>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-semibold mb-0">Expected file format</h6>
+                <a href="<?= base_url('hod/group_import.php?download=template') ?>" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download me-1"></i> Download Sample
+                </a>
+            </div>
+            <p class="text-muted small mb-2">Comma-separated (.csv)</p>
+            <pre class="mb-3" style="font-size:.82em;">Group ID,Group Name,Student Name,Index Number,Email
+GRP-001,Group 1,Emmanuel Tetteh,ICT/2021/001,emmanuel.tetteh@st.rmu.edu.gh
+GRP-001,Group 1,Akosua Boateng,ICT/2021/002,akosua.boateng@st.rmu.edu.gh
+GRP-002,Group 2,Kwame Darko,ICT/2022/001,kwame.darko@st.rmu.edu.gh</pre>
+            <p class="text-muted small mb-2">Tab-separated (.txt) — Linux/Unix format</p>
+            <pre class="mb-0" style="font-size:.82em;">Group ID&#9;Group Name&#9;Student Name&#9;Index Number&#9;Email
+GRP-001&#9;Group 1&#9;Emmanuel Tetteh&#9;ICT/2021/001&#9;emmanuel.tetteh@st.rmu.edu.gh
+GRP-002&#9;Group 2&#9;Kwame Darko&#9;ICT/2022/001&#9;kwame.darko@st.rmu.edu.gh</pre>
         </div>
     </div>
 <?php endif; ?>
@@ -450,7 +506,7 @@ GRP-002,Team Beta,Bob Johnson,CS/2021/003,bob.j@university.edu</pre>
                             <td class="fw-semibold"><?= e($g['name']) ?></td>
                             <td><?= (int) $g['member_count'] ?></td>
                             <td><span class="badge <?= $status_cls ?>"><?= e(ucfirst(str_replace('_',' ',$g['status'] ?? 'formed'))) ?></span></td>
-                            <td><small><?= $g['workflow'] === 'direct_proposal' ? 'Direct Proposal' : 'Topic → Proposal' ?></small></td>
+                            <td><small>Topic &amp; Proposal</small></td>
                             <td><?= e($g['academic_year'] ?? '—') ?></td>
                             <td><small class="text-muted"><?= $g['created_at'] ? date('M j, Y', strtotime($g['created_at'])) : '—' ?></small></td>
                         </tr>

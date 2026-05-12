@@ -175,10 +175,10 @@ if ($role === 'student') {
             p.group_id,
             COALESCE(g.name, CONCAT("Solo Vault - ", lead_u.full_name)) AS vault_name,
             lead_u.full_name AS lead_name,
-            lead_u.reg_number AS lead_reg_number,
+            lead_u.index_number AS lead_index_number,
             lead_u.email AS lead_email,
             sup_u.full_name AS supervisor_name,
-            (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+            (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
                 FROM `group_members` gm2
                 JOIN users u2 ON u2.id = gm2.student_id
                 WHERE gm2.group_id = p.group_id) AS member_directory
@@ -237,8 +237,8 @@ if ($role === 'student') {
     $topbarBreadcrumbCurrent = 'Supervisor Dashboard';
     $stats['assigned_vaults'] = [];
 
-    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, p.updated_at, p.group_id, u.id AS student_id, u.full_name AS student_name, u.reg_number, u.email, g.name AS group_name,
-        (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.reg_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
+    $stmt = $pdo->prepare('SELECT p.id, p.title, p.status, p.updated_at, p.group_id, u.id AS student_id, u.full_name AS student_name, u.index_number, u.email, g.name AS group_name,
+        (SELECT GROUP_CONCAT(CONCAT(u2.full_name, " (", COALESCE(NULLIF(u2.index_number, ""), u2.email), ")") ORDER BY CASE WHEN gm2.role = "lead" THEN 0 ELSE 1 END, u2.full_name SEPARATOR ", ")
             FROM `group_members` gm2
             JOIN users u2 ON u2.id = gm2.student_id
             WHERE gm2.group_id = p.group_id) AS group_member_directory
@@ -654,7 +654,7 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
                                         <?php
                                             $members = array_values(array_filter(array_map('trim', explode(',', (string) ($vault['group_member_directory'] ?? '')))));
                                             if (empty($members)) {
-                                                $members = [($vault['student_name'] ?? '—') . ' (' . (($vault['reg_number'] ?: $vault['email']) ?: '—') . ')'];
+                                                $members = [($vault['student_name'] ?? '—') . ' (' . (($vault['index_number'] ?: $vault['email']) ?: '—') . ')'];
                                             }
                                             $member_primary = $members[0] ?? '—';
                                             $member_secondary = $members[1] ?? '';
@@ -797,7 +797,7 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
                                     }));
                                 }
                                 if (empty($members)) {
-                                    $members[] = (($p['lead_name'] ?? '—') . ' (' . (($p['lead_reg_number'] ?: $p['lead_email']) ?: '—') . ')');
+                                    $members[] = (($p['lead_name'] ?? '—') . ' (' . (($p['lead_index_number'] ?: $p['lead_email']) ?: '—') . ')');
                                 }
                                 $member_primary = $members[0] ?? '—';
                                 $member_secondary = $members[1] ?? '';
