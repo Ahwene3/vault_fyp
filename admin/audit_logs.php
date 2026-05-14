@@ -25,9 +25,11 @@ $action_meta = [
 ];
 
 $severity_meta = [
-    'info'     => ['Info',     'bg-info',    '#22d3ee'],
-    'warning'  => ['Warning',  'bg-warning', '#f59e0b'],
-    'critical' => ['Critical', 'bg-danger',  '#ef4444'],
+    'info'     => ['label' => 'Info',     'class' => 'bg-info',    'color' => '#22d3ee'],
+    'warning'  => ['label' => 'Warning',  'class' => 'bg-warning', 'color' => '#f59e0b'],
+    'critical' => ['label' => 'Critical', 'class' => 'bg-danger',  'color' => '#ef4444'],
+    'error'    => ['label' => 'Error',    'class' => 'bg-danger',  'color' => '#ef4444'],
+    'debug'    => ['label' => 'Debug',    'class' => 'bg-secondary','color' => '#64748b'],
 ];
 
 $category_labels = [
@@ -662,7 +664,8 @@ require_once __DIR__ . '/../includes/header.php';
                 <td><span class="ip-mono"><?= e($log['ip_address'] ?? '—') ?></span></td>
                 <td><span style="font-size:.75rem;color:#475569;"><?= e($log['user_agent'] ?? '—') ?></span></td>
                 <td>
-                    <span class="sev-badge sev-<?= $log['severity'] ?>"><?= $severity_meta[$log['severity']]['label'] ?></span>
+                    <?php $sev = $severity_meta[$log['severity']] ?? ['label' => ucfirst($log['severity']), 'class' => 'bg-secondary', 'color' => '#64748b']; ?>
+                    <span class="sev-badge sev-<?= e($log['severity']) ?>"><?= e($sev['label']) ?></span>
                 </td>
                 <td style="max-width:180px;">
                     <?php if ($log['details']): ?>

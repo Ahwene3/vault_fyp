@@ -325,6 +325,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
 
 
 $pageTitle = 'Group Vault Detail';
+/* Capture flash before header.php consumes it — displayed as toasts below */
+$_toast_success = flash('success');
+$_toast_error   = flash('error');
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
@@ -450,8 +453,8 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php if ($ms['description']): ?><div class="text-muted small"><?= e($ms['description']) ?></div><?php endif; ?>
                             <div class="small mt-1">
                                 <?php if ($ms['chapter_ref']): ?><span class="badge bg-info text-dark me-1"><?= e(str_replace('chapter', 'Chapter ', $ms['chapter_ref'])) ?></span><?php endif; ?>
-                                <span class="<?= $overdue ? 'text-danger fw-semibold' : 'text-muted' ?>">Due: <?= e(date('M j, Y', strtotime($ms['due_date']))) ?><?= $overdue ? ' — Overdue' : '' ?></span>
-                                <?php if ($done): ?><span class="text-success ms-2">Completed <?= e(date('M j, Y', strtotime($ms['completed_at']))) ?></span><?php endif; ?>
+                                <span class="<?= $overdue ? 'text-danger fw-semibold' : 'text-muted' ?>">Due: <?= e(date('d/m/Y', strtotime($ms['due_date']))) ?><?= $overdue ? ' — Overdue' : '' ?></span>
+                                <?php if ($done): ?><span class="text-success ms-2">Completed <?= e(date('d/m/Y', strtotime($ms['completed_at']))) ?></span><?php endif; ?>
                             </div>
                         </div>
                         <?php if (!$is_archived): ?>
@@ -820,5 +823,38 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 
 <p class="mt-3"><a href="<?= base_url('supervisor/students.php') ?>" class="btn btn-outline-secondary">Back to Group Vaults</a></p>
+
+<!-- Toast notification -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999;">
+    <div id="mainToast" class="toast align-items-center text-white border-0" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body fw-semibold" id="mainToastMsg"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    /* ── Toast ── */
+    const toastMsg  = <?= json_encode($_toast_success ?: $_toast_error ?: '') ?>;
+    const toastType = <?= json_encode($_toast_success ? 'success' : ($_toast_error ? 'danger' : '')) ?>;
+    if (toastMsg) {
+        const el = document.getElementById('mainToast');
+        el.classList.add('bg-' + toastType);
+        document.getElementById('mainToastMsg').textContent = toastMsg;
+        new bootstrap.Toast(el, { delay: 4500 }).show();
+    }
+
+    /* ── Activate tab from URL hash ── */
+    const hash = location.hash;
+    if (hash) {
+        const tabEl = document.getElementById(hash.slice(1));
+        if (tabEl && tabEl.getAttribute('data-bs-toggle') === 'tab') {
+            new bootstrap.Tab(tabEl).show();
+        }
+    }
+})();
+</script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

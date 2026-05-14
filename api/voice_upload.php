@@ -109,9 +109,12 @@ try {
         'INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)'
     );
     $first_id = null;
+    $last_id  = null;
     foreach ($recipient_ids as $rid) {
         $ins->execute([$project_id, $uid, $rid, $audio_path, $duration]);
-        if ($first_id === null) $first_id = (int) $pdo->lastInsertId();
+        $inserted_id = (int) $pdo->lastInsertId();
+        if ($first_id === null) $first_id = $inserted_id;
+        $last_id = $inserted_id;
         $noti->execute([$rid, 'message', 'New voice note',
             'You have a new voice message.', base_url('messages.php?pid=' . $project_id . '&with=' . $uid)]);
     }
@@ -128,11 +131,12 @@ $sn->execute([$uid]);
 $sender_name = $sn->fetchColumn();
 
 echo json_encode([
-    'ok'           => true,
-    'id'           => $first_id,
-    'sender_id'    => $uid,
-    'sender_name'  => $sender_name,
-    'audio_path'   => base_url($audio_path),
+    'ok'             => true,
+    'id'             => $first_id,
+    'max_id'         => $last_id,
+    'sender_id'      => $uid,
+    'sender_name'    => $sender_name,
+    'audio_url'      => base_url($audio_path),
     'audio_duration' => $duration,
     'created_at_fmt' => date('M j, H:i'),
 ]);

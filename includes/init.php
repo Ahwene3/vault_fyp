@@ -143,7 +143,7 @@ function audit_log(
             $details ?: null,
             $ip, $ua, $severity,
         ]);
-    } catch (Throwable $e) {
+    } catch (Throwable) {
         /* never crash the app over a log failure */
     }
 }
@@ -604,16 +604,16 @@ function ensure_discovery_tables(PDO $pdo): void {
     // Ensure view_count cache column on projects
     $cols = array_column($pdo->query('DESCRIBE projects')->fetchAll(), 'Field');
     if (!in_array('view_count', $cols, true)) {
-        try { $pdo->exec('ALTER TABLE projects ADD COLUMN view_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER updated_at'); } catch (Throwable $e) {}
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN view_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER updated_at'); } catch (Throwable) {}
     }
     if (!in_array('technology_stack', $cols, true)) {
-        try { $pdo->exec('ALTER TABLE projects ADD COLUMN technology_stack VARCHAR(500) NULL AFTER keywords'); } catch (Throwable $e) {}
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN technology_stack VARCHAR(500) NULL AFTER keywords'); } catch (Throwable) {}
     }
     if (!in_array('avg_rating', $cols, true)) {
-        try { $pdo->exec('ALTER TABLE projects ADD COLUMN avg_rating DECIMAL(3,2) NULL AFTER view_count'); } catch (Throwable $e) {}
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN avg_rating DECIMAL(3,2) NULL AFTER view_count'); } catch (Throwable) {}
     }
     if (!in_array('rating_count', $cols, true)) {
-        try { $pdo->exec('ALTER TABLE projects ADD COLUMN rating_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER avg_rating'); } catch (Throwable $e) {}
+        try { $pdo->exec('ALTER TABLE projects ADD COLUMN rating_count INT UNSIGNED NOT NULL DEFAULT 0 AFTER avg_rating'); } catch (Throwable) {}
     }
 
     // Star ratings + written reviews
@@ -700,6 +700,36 @@ function refresh_project_rating(PDO $pdo, int $project_id): void {
     $pdo->prepare('UPDATE projects SET avg_rating = ?, rating_count = ? WHERE id = ?')->execute([$avg ?: null, (int) $cnt, $project_id]);
 }
 
+function ensure_meetings_table(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS meetings (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        requester_id INT UNSIGNED NOT NULL,
+        supervisor_id INT UNSIGNED NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        purpose TEXT NOT NULL,
+        meeting_date DATE NOT NULL,
+        meeting_time TIME NOT NULL,
+        meeting_type ENUM('physical','online') NOT NULL DEFAULT 'physical',
+        venue VARCHAR(500) NULL DEFAULT NULL,
+        meeting_link VARCHAR(500) NULL DEFAULT NULL,
+        notes TEXT NULL DEFAULT NULL,
+        status ENUM('pending','approved','rejected','rescheduled','completed','cancelled') NOT NULL DEFAULT 'pending',
+        response_notes TEXT NULL DEFAULT NULL,
+        rescheduled_date DATE NULL DEFAULT NULL,
+        rescheduled_time TIME NULL DEFAULT NULL,
+        attachment_path VARCHAR(500) NULL DEFAULT NULL,
+        attachment_name VARCHAR(255) NULL DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id),
+        INDEX idx_requester (requester_id),
+        INDEX idx_supervisor (supervisor_id),
+        INDEX idx_status (status),
+        INDEX idx_date (meeting_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
 function ensure_announcements_tables(PDO $pdo): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS announcements (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -731,6 +761,110 @@ function ensure_announcements_tables(PDO $pdo): void {
         read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_ann_read (announcement_id, user_id),
         INDEX idx_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function ensure_messages_deleted_columns(PDO $pdo): void {
+    try {
+        /* Use INFORMATION_SCHEMA — works on all MySQL/MariaDB versions */
+        $db = $pdo->query('SELECT DATABASE()')->fetchColumn();
+        $cols = $pdo->prepare(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'messages'"
+        );
+        $cols->execute([$db]);
+        $existing = $cols->fetchAll(PDO::FETCH_COLUMN);
+
+        if (!in_array('is_deleted', $existing, true)) {
+            $pdo->exec("ALTER TABLE messages ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0");
+        }
+        if (!in_array('deleted_at', $existing, true)) {
+            $pdo->exec("ALTER TABLE messages ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
+        }
+        if (!in_array('deleted_by', $existing, true)) {
+            $pdo->exec("ALTER TABLE messages ADD COLUMN deleted_by INT UNSIGNED NULL DEFAULT NULL");
+        }
+        /* add index only if not already present */
+        $idxs = $pdo->prepare(
+            "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'messages' AND INDEX_NAME = 'idx_deleted'"
+        );
+        $idxs->execute([$db]);
+        if (!$idxs->fetchColumn()) {
+            $pdo->exec("ALTER TABLE messages ADD INDEX idx_deleted (is_deleted)");
+        }
+    } catch (Throwable) {}
+}
+
+function ensure_viva_tables(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS viva_details (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL UNIQUE,
+        viva_type ENUM('proposal','final') NOT NULL DEFAULT 'final',
+        viva_date DATE NULL,
+        viva_time TIME NULL,
+        venue VARCHAR(500) NULL,
+        panel_members TEXT NULL,
+        notes TEXT NULL,
+        is_confirmed TINYINT(1) NOT NULL DEFAULT 0,
+        set_by INT UNSIGNED NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS viva_materials (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        student_id INT UNSIGNED NOT NULL,
+        file_name VARCHAR(255) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_type ENUM('slides','pdf','poster','video','screenshot','other') NOT NULL DEFAULT 'other',
+        file_size INT UNSIGNED NOT NULL DEFAULT 0,
+        uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id),
+        INDEX idx_student (student_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS viva_recordings (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        student_id INT UNSIGNED NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_name VARCHAR(255) NOT NULL,
+        duration_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+        session_label VARCHAR(255) NULL,
+        mime_type VARCHAR(100) NOT NULL DEFAULT 'audio/webm',
+        recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id),
+        INDEX idx_student (student_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS viva_checklist (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        student_id INT UNSIGNED NOT NULL,
+        item_key VARCHAR(100) NOT NULL,
+        is_checked TINYINT(1) NOT NULL DEFAULT 0,
+        checked_at TIMESTAMP NULL,
+        UNIQUE KEY uq_item (project_id, student_id, item_key),
+        INDEX idx_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS viva_feedback (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_id INT UNSIGNED NOT NULL,
+        supervisor_id INT UNSIGNED NOT NULL,
+        content TEXT NULL,
+        attachment_path VARCHAR(500) NULL,
+        attachment_name VARCHAR(255) NULL,
+        voice_path VARCHAR(500) NULL,
+        is_approved TINYINT(1) NOT NULL DEFAULT 0,
+        approved_at TIMESTAMP NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_project (project_id),
+        INDEX idx_supervisor (supervisor_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 

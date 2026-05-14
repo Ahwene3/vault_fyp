@@ -47,7 +47,7 @@ $stmt = $pdo->prepare(
             m.message_type, m.audio_path, m.audio_duration, m.created_at
      FROM messages m
      JOIN users u ON m.sender_id = u.id
-     WHERE m.project_id = ? AND m.id > ?
+     WHERE m.project_id = ? AND m.id > ? AND m.is_deleted = 0
      GROUP BY m.sender_id, m.body, m.message_type, m.audio_path, m.audio_duration, m.created_at, u.full_name
      ORDER BY m.created_at ASC, MIN(m.id) ASC
      LIMIT 50'
@@ -59,6 +59,16 @@ if (!empty($rows)) {
     $pdo->prepare('UPDATE messages SET is_read = 1, read_at = NOW() WHERE project_id = ? AND recipient_id = ? AND is_read = 0')
         ->execute([$pid, $uid]);
 }
+
+/* deleted messages — return grouped min(id) so clients can remove bubbles */
+$dstmt = $pdo->prepare(
+    'SELECT MIN(m.id) AS id
+     FROM messages m
+     WHERE m.project_id = ? AND m.is_deleted = 1
+     GROUP BY m.sender_id, m.body, m.message_type, m.audio_path, m.audio_duration, m.created_at'
+);
+$dstmt->execute([$pid]);
+$deleted_ids = array_column($dstmt->fetchAll(), 'id');
 
 $base = rtrim((defined('BASE_URL') ? BASE_URL : ''), '/') . '/';
 $out = [];
@@ -75,4 +85,4 @@ foreach ($rows as $m) {
     ];
 }
 
-echo json_encode(['messages' => $out]);
+echo json_encode(['messages' => $out, 'deleted' => array_map('intval', $deleted_ids)]);

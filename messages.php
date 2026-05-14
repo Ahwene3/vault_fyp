@@ -158,6 +158,34 @@ $stmt->execute([$uid]);
 $unread_message_count = (int) $stmt->fetchColumn();
 $active_contacts = count($conversations);
 
+ensure_messages_deleted_columns($pdo);
+
+/* ── Delete message (AJAX, JSON response) ────────────────────── */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_message') {
+    header('Content-Type: application/json');
+    if (!csrf_verify()) { echo json_encode(['ok'=>false,'error'=>'Security check failed']); exit; }
+    $del_id  = (int)($_POST['message_id'] ?? 0);
+    $del_pid = (int)($_POST['project_id'] ?? 0);
+    if (!$del_id || !$del_pid) { echo json_encode(['ok'=>false,'error'=>'Invalid params']); exit; }
+    /* fetch the row so we can identify all fan-out copies */
+    $mq = $pdo->prepare('SELECT sender_id, body, message_type, audio_path, created_at FROM messages WHERE id=? AND project_id=? LIMIT 1');
+    $mq->execute([$del_id, $del_pid]);
+    $dmsg = $mq->fetch();
+    if (!$dmsg || (int)$dmsg['sender_id'] !== $uid) {
+        echo json_encode(['ok'=>false,'error'=>'Message not found or not yours']); exit;
+    }
+    /* mark every fan-out row for this logical message as deleted */
+    if ($dmsg['message_type'] === 'voice' && $dmsg['audio_path']) {
+        $pdo->prepare('UPDATE messages SET is_deleted=1, deleted_at=NOW(), deleted_by=? WHERE project_id=? AND sender_id=? AND audio_path=?')
+            ->execute([$uid, $del_pid, $uid, $dmsg['audio_path']]);
+    } else {
+        $pdo->prepare('UPDATE messages SET is_deleted=1, deleted_at=NOW(), deleted_by=? WHERE project_id=? AND sender_id=? AND body=? AND created_at=?')
+            ->execute([$uid, $del_pid, $uid, $dmsg['body'], $dmsg['created_at']]);
+    }
+    echo json_encode(['ok'=>true, 'deleted_id'=>$del_id]);
+    exit;
+}
+
 $project_is_archived = false;
 if ($project_id) {
     $pre_check = fetch_project_context($pdo, $project_id);
@@ -264,19 +292,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify() && $project_context) 
     }
 }
 
-$messages = [];
+$messages    = [];
+$max_msg_id  = 0;
 if ($project_context) {
     $stmt = $pdo->prepare(
         'SELECT MIN(m.id) AS id, m.sender_id, u.full_name AS sender_name,
                 m.body, m.message_type, m.audio_path, m.audio_duration, m.created_at
          FROM messages m
          JOIN users u ON m.sender_id = u.id
-         WHERE m.project_id = ?
+         WHERE m.project_id = ? AND m.is_deleted = 0
          GROUP BY m.sender_id, m.body, m.message_type, m.audio_path, m.audio_duration, m.created_at, u.full_name
          ORDER BY m.created_at ASC, MIN(m.id) ASC'
     );
     $stmt->execute([$project_id]);
     $messages = $stmt->fetchAll();
+    /* true MAX id across ALL rows (including fan-out) so the poll baseline is correct */
+    $maxq = $pdo->prepare('SELECT COALESCE(MAX(id),0) FROM messages WHERE project_id=?');
+    $maxq->execute([$project_id]);
+    $max_msg_id = (int)$maxq->fetchColumn();
 }
 
 $chat_header = '';
@@ -400,6 +433,7 @@ require_once __DIR__ . '/includes/header.php';
                                     $dur_fmt   = sprintf('%d:%02d', intdiv($dur, 60), $dur % 60);
                                 ?>
                                 <div class="vn-bubble vn-voice-bubble">
+                                    <?php if ($mine): ?><div class="vn-opts" data-msg-id="<?= (int)$m['id'] ?>"><button class="vn-opts-arrow" onclick="vnOpenMenu(this,event)"><i class="bi bi-chevron-down"></i></button></div><?php endif; ?>
                                     <?php if (!$mine): ?>
                                         <div class="vn-sender"><?= e($m['sender_name']) ?></div>
                                     <?php endif; ?>
@@ -430,6 +464,7 @@ require_once __DIR__ . '/includes/header.php';
                                 </div>
                             <?php else: ?>
                                 <div class="vn-bubble vn-text-bubble">
+                                    <?php if ($mine): ?><div class="vn-opts" data-msg-id="<?= (int)$m['id'] ?>"><button class="vn-opts-arrow" onclick="vnOpenMenu(this,event)"><i class="bi bi-chevron-down"></i></button></div><?php endif; ?>
                                     <?php if (!$mine): ?>
                                         <div class="vn-sender"><?= e($m['sender_name']) ?></div>
                                     <?php endif; ?>
@@ -465,13 +500,18 @@ require_once __DIR__ . '/includes/header.php';
 
                     <!-- Preview UI (hidden by default) -->
                     <div class="vn-preview-bar d-none" id="vn-preview-bar">
-                        <i class="bi bi-mic-fill text-success me-2"></i>
-                        <span class="vn-preview-label">Voice note ready</span>
-                        <span class="vn-preview-dur" id="vn-preview-dur"></span>
-                        <button class="btn btn-sm btn-outline-danger ms-auto me-2" id="vn-discard-btn" type="button">Discard</button>
-                        <button class="btn btn-sm btn-success" id="vn-send-voice-btn" type="button">
-                            <i class="bi bi-send me-1"></i>Send
-                        </button>
+                        <div class="vn-preview-inner">
+                            <div class="vn-preview-top">
+                                <i class="bi bi-mic-fill" style="color:#4ade80;font-size:.9rem;"></i>
+                                <span class="vn-preview-label">Preview your recording</span>
+                                <span class="vn-preview-dur" id="vn-preview-dur"></span>
+                            </div>
+                            <audio id="vn-preview-audio" controls style="width:100%;height:32px;margin:.4rem 0 .5rem;accent-color:#3b82f6;"></audio>
+                            <div class="vn-preview-actions">
+                                <button class="btn btn-sm btn-outline-danger" id="vn-discard-btn" type="button"><i class="bi bi-trash me-1"></i>Discard</button>
+                                <button class="btn btn-sm btn-success" id="vn-send-voice-btn" type="button"><i class="bi bi-send me-1"></i>Send</button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Normal composer -->
@@ -555,6 +595,49 @@ require_once __DIR__ . '/includes/header.php';
 .vn-sender { font-size:.75rem; font-weight:600; opacity:.8; margin-bottom:.3rem; color:#38bdf8; }
 .vn-body   { font-size:.92rem; line-height:1.5; word-break:break-word; }
 .vn-ts     { font-size:.68rem; opacity:.6; margin-top:.35rem; text-align:right; }
+
+/* ── WhatsApp-style message options ── */
+.vn-bubble { position:relative; overflow:visible; }
+
+.vn-opts {
+    position:absolute; top:.3rem; right:.35rem;
+    z-index:20;
+}
+
+.vn-opts-arrow {
+    opacity:0; transition:opacity .15s;
+    width:1.6rem; height:1.6rem; border-radius:50%; border:none;
+    background:rgba(0,0,0,.55); color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-size:.7rem; cursor:pointer; backdrop-filter:blur(4px);
+    transition:opacity .15s, background .15s;
+}
+.vn-bubble:hover .vn-opts-arrow,
+.vn-opts.is-open .vn-opts-arrow { opacity:1; }
+.vn-opts-arrow:hover { background:rgba(0,0,0,.8); }
+
+/* .vn-opts-menu lives in a body-level portal — see #vn-portal-menu CSS */
+#vn-portal-menu {
+    position:fixed;
+    background:#1e293b; border:1px solid rgba(255,255,255,.15);
+    border-radius:.6rem; min-width:180px; box-shadow:0 8px 32px rgba(0,0,0,.55);
+    overflow:hidden; z-index:99999;
+}
+
+.vn-opts-delete {
+    width:100%; background:none; border:none; text-align:left;
+    padding:.6rem .9rem; font-size:.82rem; color:#f87171;
+    cursor:pointer; display:flex; align-items:center; gap:.5rem;
+    transition:background .12s;
+}
+.vn-opts-delete:hover { background:rgba(239,68,68,.12); }
+
+/* deleted placeholder */
+.vn-deleted-bubble {
+    font-size:.82rem; color:rgba(255,255,255,.3); font-style:italic;
+    padding:.45rem .75rem; border:1px dashed rgba(255,255,255,.12);
+    border-radius:10px; display:flex; align-items:center; gap:.4rem;
+}
 
 /* ── Voice player ── */
 .vn-voice-player {
@@ -703,13 +786,17 @@ require_once __DIR__ . '/includes/header.php';
 
 /* ── Preview bar ── */
 .vn-preview-bar {
-    display:flex; align-items:center; gap:.5rem;
     background:rgba(52,211,153,.07);
-    border:1px solid rgba(52,211,153,.2);
-    border-radius:12px; padding:.5rem .8rem;
-    margin-bottom:.5rem; font-size:.85rem; color:#86efac;
+    border:1px solid rgba(52,211,153,.25);
+    border-radius:12px; padding:.6rem .85rem;
+    margin-bottom:.5rem;
 }
-.vn-preview-dur { color:#34d399; font-variant-numeric:tabular-nums; }
+.vn-preview-inner { display:flex; flex-direction:column; gap:0; width:100%; }
+.vn-preview-top { display:flex; align-items:center; gap:.5rem; font-size:.82rem; color:#86efac; }
+.vn-preview-top .vn-preview-label { flex:1; font-weight:600; }
+.vn-preview-dur { color:#34d399; font-variant-numeric:tabular-nums; font-size:.78rem; }
+.vn-preview-actions { display:flex; gap:.5rem; }
+#vn-preview-audio::-webkit-media-controls-panel { background:rgba(15,23,42,.6); }
 
 /* ── Scrollbar ── */
 .vn-thread::-webkit-scrollbar       { width:5px; }
@@ -722,6 +809,37 @@ require_once __DIR__ . '/includes/header.php';
     .vn-voice-player { flex-wrap:wrap; }
 }
 </style>
+
+<!-- ── Delete confirmation modal ── -->
+<div class="modal fade" id="deleteMsgModal" tabindex="-1" aria-labelledby="deleteMsgModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content" style="background:#1e293b;border:1px solid rgba(255,255,255,.1);border-radius:1rem;">
+            <div class="modal-body text-center py-4 px-3">
+                <div style="width:3.5rem;height:3.5rem;border-radius:50%;background:rgba(239,68,68,.15);display:flex;align-items:center;justify-content:center;margin:0 auto .9rem;">
+                    <i class="bi bi-trash3-fill" style="font-size:1.5rem;color:#f87171;"></i>
+                </div>
+                <h6 style="color:#f1f5f9;font-weight:700;margin-bottom:.4rem;">Delete message?</h6>
+                <p style="color:#94a3b8;font-size:.82rem;margin:0;">This message will be deleted for <strong style="color:#cbd5e1;">everyone</strong> in the chat.</p>
+            </div>
+            <div class="modal-footer justify-content-center border-0 pt-0 pb-3 gap-2">
+                <button type="button" class="btn btn-sm" style="background:rgba(255,255,255,.08);color:#cbd5e1;border:1px solid rgba(255,255,255,.12);border-radius:.6rem;padding:.45rem 1.2rem;" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-sm btn-danger" id="confirm-delete-btn" style="border-radius:.6rem;padding:.45rem 1.2rem;">
+                    <i class="bi bi-trash3 me-1"></i>Delete for everyone
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Toast ── -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999;">
+    <div id="msg-action-toast" class="toast align-items-center text-white border-0" role="alert" aria-live="assertive" aria-atomic="true" style="border-radius:.75rem;min-width:220px;">
+        <div class="d-flex">
+            <div class="toast-body fw-semibold" id="msg-toast-body" style="font-size:.85rem;"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
 
 <!-- ════════════════════════════ SCRIPTS ════════════════════════════ -->
 <?php if ($project_context): ?>
@@ -749,8 +867,10 @@ const stopBtn   = document.getElementById('vn-stop-btn');
 const discardBtn= document.getElementById('vn-discard-btn');
 const sendVoice = document.getElementById('vn-send-voice-btn');
 const recTimer  = document.getElementById('vn-rec-timer');
-const prevDur   = document.getElementById('vn-preview-dur');
-const recWaves  = document.getElementById('vn-rec-waves');
+const prevDur    = document.getElementById('vn-preview-dur');
+const prevAudio  = document.getElementById('vn-preview-audio');
+const recWaves   = document.getElementById('vn-rec-waves');
+let   prevObjUrl = null;
 
 /* ── Recording state ── */
 let mediaRec = null, recChunks = [], recInterval = null, recSecs = 0, voiceBlob = null, voiceDur = 0;
@@ -836,6 +956,13 @@ function cancelRec() {
 /* ── Show preview ── */
 function showPreview() {
     prevDur.textContent = fmt(voiceDur);
+    /* revoke any old object URL */
+    if (prevObjUrl) { URL.revokeObjectURL(prevObjUrl); prevObjUrl = null; }
+    if (prevAudio && voiceBlob) {
+        prevObjUrl = URL.createObjectURL(voiceBlob);
+        prevAudio.src = prevObjUrl;
+        prevAudio.load();
+    }
     prevBar.classList.remove('d-none');
     textForm.classList.add('d-none');
 }
@@ -843,6 +970,8 @@ function showPreview() {
 /* ── Discard voice note ── */
 function discardVoice() {
     voiceBlob = null; voiceDur = 0;
+    if (prevAudio) { prevAudio.pause(); prevAudio.src = ''; }
+    if (prevObjUrl) { URL.revokeObjectURL(prevObjUrl); prevObjUrl = null; }
     prevBar.classList.add('d-none');
     textForm.classList.remove('d-none');
 }
@@ -864,7 +993,8 @@ async function sendVoiceNote() {
             appendVoiceBubble(data, true);
             discardVoice();
             thread.scrollTop = thread.scrollHeight;
-            lastId = Math.max(lastId, data.id);
+            /* use max_id so the poll skips ALL fan-out rows, preventing duplicates */
+            lastId = Math.max(lastId, data.max_id ?? data.id);
         } else {
             alert('Error: ' + (data.error || 'Upload failed'));
         }
@@ -903,7 +1033,10 @@ function buildVoiceBubble(data, mine) {
             </div>
         </div>
         <div class="vn-ts">${escHtml(data.created_at_fmt)}</div>
-    </div>`;
+    </div>
+    ${mine ? `<div class="vn-opts" data-msg-id="${data.id}">
+        <button class="vn-opts-arrow" onclick="vnOpenMenu(this,event)"><i class="bi bi-chevron-down"></i></button>
+    </div>` : ''}`;
 
     initVoicePlayer(wrap.querySelector('.vn-voice-player'));
     return wrap;
@@ -1004,39 +1137,128 @@ stopBtn?.addEventListener('click', stopRec);
 discardBtn?.addEventListener('click', discardVoice);
 sendVoice?.addEventListener('click', sendVoiceNote);
 
+/* ── Message options (WhatsApp-style) ── */
+let _pendingDeleteId = null;
+const confirmDelBtn  = document.getElementById('confirm-delete-btn');
+const toastEl        = document.getElementById('msg-action-toast');
+const toastBody      = document.getElementById('msg-toast-body');
+
+/* lazy-init Bootstrap instances so they're created after Bootstrap JS loads (footer.php) */
+let _deleteModal = null, _bsToast = null;
+function getDeleteModal() {
+    if (!_deleteModal) _deleteModal = new bootstrap.Modal(document.getElementById('deleteMsgModal'));
+    return _deleteModal;
+}
+function getBsToast() {
+    if (!_bsToast) _bsToast = new bootstrap.Toast(toastEl, { delay: 3500 });
+    return _bsToast;
+}
+
+/* receive delete trigger from global vnDelete() outside IIFE */
+document.addEventListener('vn:delete', e => {
+    _pendingDeleteId = e.detail.id;
+    getDeleteModal().show();
+});
+
+function showToast(msg, type) {
+    toastEl.className = 'toast align-items-center text-white border-0';
+    toastEl.classList.add('bg-' + (type || 'success'));
+    toastBody.textContent = msg;
+    getBsToast().show();
+}
+
+/* close portal menu on outside click */
+document.addEventListener('click', () => {
+    document.getElementById('vn-portal-menu')?.remove();
+});
+
+/* confirm delete button in modal */
+confirmDelBtn?.addEventListener('click', () => {
+    if (!_pendingDeleteId) return;
+    confirmDelBtn.disabled = true;
+    confirmDelBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deleting…';
+    const fd = new FormData();
+    fd.append('action', 'delete_message');
+    fd.append('message_id', _pendingDeleteId);
+    fd.append('project_id', PID);
+    fd.append('csrf_token', CSRF);
+    fetch(window.location.pathname + window.location.search, { method:'POST', body:fd, credentials:'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+            getDeleteModal().hide();
+            if (data.ok) {
+                removeBubble(_pendingDeleteId);
+                showToast('Message deleted for everyone.', 'success');
+            } else {
+                showToast(data.error || 'Could not delete message.', 'danger');
+            }
+        })
+        .catch(() => { getDeleteModal().hide(); showToast('Network error. Please try again.', 'danger'); })
+        .finally(() => {
+            confirmDelBtn.disabled = false;
+            confirmDelBtn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Delete for everyone';
+            _pendingDeleteId = null;
+        });
+});
+
+function removeBubble(id) {
+    const row = document.querySelector('.vn-msg-row[data-id="'+id+'"]');
+    if (!row) return;
+    const bubble = row.querySelector('.vn-bubble');
+    if (bubble) {
+        bubble.innerHTML = '<span class="vn-deleted-bubble"><i class="bi bi-slash-circle"></i> This message was deleted</span>';
+        bubble.className = 'vn-bubble';
+    }
+}
+
 /* ── Poll for new messages ── */
-let lastId = <?= !empty($messages) ? (int) end($messages)['id'] : 0 ?>;
+/* Use MAX(id) across ALL fan-out rows so poll baseline is correct, preventing duplicates */
+let lastId = <?= $max_msg_id ?>;
+
+function buildTextBubble(m, mine) {
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-3 vn-msg-row ' + (mine ? 'vn-mine' : 'vn-theirs');
+    wrap.dataset.id = m.id;
+    const bubble = document.createElement('div');
+    bubble.className = 'vn-bubble vn-text-bubble';
+    if (!mine) {
+        const sn = document.createElement('div');
+        sn.className = 'vn-sender'; sn.textContent = m.sender_name;
+        bubble.appendChild(sn);
+    }
+    const bd = document.createElement('div');
+    bd.className = 'vn-body'; bd.textContent = m.body;
+    bubble.appendChild(bd);
+    const ts = document.createElement('div');
+    ts.className = 'vn-ts'; ts.textContent = m.created_at_fmt;
+    bubble.appendChild(ts);
+    wrap.appendChild(bubble);
+    if (mine) {
+        const opts = document.createElement('div');
+        opts.className = 'vn-opts'; opts.dataset.msgId = m.id;
+        opts.innerHTML = `<button class="vn-opts-arrow" onclick="vnOpenMenu(this,event)"><i class="bi bi-chevron-down"></i></button>`;
+        wrap.appendChild(opts);
+    }
+    return wrap;
+}
 
 function poll() {
     fetch(POLL_URL + '?pid=' + PID + '&after=' + lastId, { credentials:'same-origin' })
         .then(r => r.ok ? r.json() : null)
         .then(data => {
-            if (!data?.messages?.length) return;
+            if (!data) return;
+            /* process deletions first */
+            if (data.deleted?.length) {
+                data.deleted.forEach(id => removeBubble(id));
+            }
+            if (!data.messages?.length) return;
             data.messages.forEach(m => {
                 if (document.querySelector('.vn-msg-row[data-id="'+m.id+'"]')) return;
                 const mine = m.sender_id == UID;
-                if (m.message_type === 'voice' && m.audio_url) {
-                    thread.appendChild(buildVoiceBubble(m, mine));
-                } else {
-                    const wrap   = document.createElement('div');
-                    wrap.className = 'mb-3 vn-msg-row ' + (mine ? 'vn-mine' : 'vn-theirs');
-                    wrap.dataset.id = m.id;
-                    const bubble = document.createElement('div');
-                    bubble.className = 'vn-bubble vn-text-bubble';
-                    if (!mine) {
-                        const sn = document.createElement('div');
-                        sn.className = 'vn-sender'; sn.textContent = m.sender_name;
-                        bubble.appendChild(sn);
-                    }
-                    const bd = document.createElement('div');
-                    bd.className = 'vn-body'; bd.textContent = m.body;
-                    bubble.appendChild(bd);
-                    const ts = document.createElement('div');
-                    ts.className = 'vn-ts'; ts.textContent = m.created_at_fmt;
-                    bubble.appendChild(ts);
-                    wrap.appendChild(bubble);
-                    thread.appendChild(wrap);
-                }
+                const row = m.message_type === 'voice' && m.audio_url
+                    ? buildVoiceBubble(m, mine)
+                    : buildTextBubble(m, mine);
+                thread.appendChild(row);
                 lastId = Math.max(lastId, m.id);
             });
             thread.scrollTop = thread.scrollHeight;
@@ -1048,6 +1270,32 @@ setInterval(poll, 15000);
 thread.scrollTop = thread.scrollHeight;
 
 })();
+
+/* ── Global handlers for inline onclick (outside IIFE, body-level portal) ── */
+function vnOpenMenu(btn, e) {
+    e.stopPropagation();
+    const existing = document.getElementById('vn-portal-menu');
+    const forId = btn.closest('.vn-opts').dataset.msgId;
+    if (existing) {
+        const same = existing.dataset.forMsgId === forId;
+        existing.remove();
+        if (same) return; /* toggle off */
+    }
+    const r = btn.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.id = 'vn-portal-menu';
+    menu.dataset.forMsgId = forId;
+    menu.style.top  = (r.bottom + 6) + 'px';
+    menu.style.left = Math.max(4, r.right - 182) + 'px';
+    menu.innerHTML = `<button class="vn-opts-delete" onclick="vnDelete(this,event)"><i class="bi bi-trash3"></i> Delete for everyone</button>`;
+    document.body.appendChild(menu);
+}
+function vnDelete(btn, e) {
+    e.stopPropagation();
+    const mid = parseInt(document.getElementById('vn-portal-menu').dataset.forMsgId, 10);
+    document.getElementById('vn-portal-menu')?.remove();
+    document.dispatchEvent(new CustomEvent('vn:delete', { detail: { id: mid } }));
+}
 </script>
 <?php endif; ?>
 

@@ -34,8 +34,8 @@ if ($current_path === '') {
     $current_path = 'dashboard.php';
 }
 
-$student_theme_paths = ['dashboard.php', 'vault.php', 'profile.php', 'notifications.php', 'messages.php', 'student/group.php', 'student/project.php', 'student/logbook.php', 'student/submit_topic.php', 'student/group_submit.php'];
-$supervisor_theme_paths = ['dashboard.php', 'vault.php', 'profile.php', 'notifications.php', 'messages.php', 'supervisor/students.php', 'supervisor/student_detail.php', 'supervisor/assessment.php', 'supervisor/logsheet.php', 'supervisor/view_document.php', 'supervisor/export_log.php'];
+$student_theme_paths = ['dashboard.php', 'vault.php', 'profile.php', 'notifications.php', 'messages.php', 'meetings.php', 'viva.php', 'student/group.php', 'student/project.php', 'student/logbook.php', 'student/submit_topic.php', 'student/group_submit.php'];
+$supervisor_theme_paths = ['dashboard.php', 'vault.php', 'profile.php', 'notifications.php', 'messages.php', 'meetings.php', 'viva.php', 'supervisor/students.php', 'supervisor/student_detail.php', 'supervisor/assessment.php', 'supervisor/logsheet.php', 'supervisor/view_document.php', 'supervisor/export_log.php'];
 $hod_theme_paths = ['dashboard.php', 'vault.php', 'profile.php', 'notifications.php', 'messages.php'];
 $is_student_area = !empty($user)
     && ($user['role'] ?? '') === 'student'
@@ -161,15 +161,42 @@ if ($renderAppSidebar) {
         } catch (Throwable $e) { $ann_unread = 0; }
     }
 
+    /* ── Pending meetings badge counts ── */
+    $meet_pdo = $pdo_header ?? getPDO();
+    $meet_badge_student = 0;
+    $meet_badge_supervisor = 0;
+    $meet_uid = (int)($user['id'] ?? 0);
+    try {
+        if ($user['role'] === 'student') {
+            $ms = $meet_pdo->prepare(
+                "SELECT COUNT(*) FROM meetings WHERE requester_id=? AND status IN ('approved') AND meeting_date >= CURDATE()"
+            );
+            $ms->execute([$meet_uid]);
+            $meet_badge_student = (int)$ms->fetchColumn();
+        } elseif ($user['role'] === 'supervisor') {
+            $ms = $meet_pdo->prepare(
+                "SELECT COUNT(*) FROM meetings WHERE supervisor_id=? AND status='pending'"
+            );
+            $ms->execute([$meet_uid]);
+            $meet_badge_supervisor = (int)$ms->fetchColumn();
+        }
+    } catch (Throwable) { /* table may not exist yet */ }
+
     if ($user['role'] === 'student') {
         $app_sidebar_links[] = ['label' => 'My Group', 'href' => 'student/group.php', 'icon' => 'bi-people'];
         $app_sidebar_links[] = ['label' => 'Submit Topic/Proposal', 'href' => 'student/submit_topic.php', 'icon' => 'bi-send'];
         $app_sidebar_links[] = ['label' => 'My Project', 'href' => 'student/project.php', 'icon' => 'bi-journal-richtext'];
         $app_sidebar_links[] = ['label' => 'Logbook', 'href' => 'student/logbook.php', 'icon' => 'bi-book'];
         $app_sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
+        $app_sidebar_links[] = ['label' => 'Meetings', 'href' => 'meetings.php', 'icon' => 'bi-calendar2-week',
+            'badge' => $meet_badge_student > 0 ? $meet_badge_student : null];
+        $app_sidebar_links[] = ['label' => 'Viva Hub', 'href' => 'viva.php', 'icon' => 'bi-mortarboard'];
     } elseif ($user['role'] === 'supervisor') {
         $app_sidebar_links[] = ['label' => 'Group Vaults', 'href' => 'supervisor/students.php', 'icon' => 'bi-people'];
         $app_sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
+        $app_sidebar_links[] = ['label' => 'Meetings', 'href' => 'meetings.php', 'icon' => 'bi-calendar2-week',
+            'badge' => $meet_badge_supervisor > 0 ? $meet_badge_supervisor : null];
+        $app_sidebar_links[] = ['label' => 'Viva Hub', 'href' => 'viva.php', 'icon' => 'bi-mortarboard'];
 
         /* ── Per-vault sidebar entries ── */
         try {
