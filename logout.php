@@ -17,6 +17,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'logout') {
         if (is_logged_in()) {
+            $pdo_logout = getPDO();
+            audit_log($pdo_logout, 'logout', 'auth', '', 0, '', 'User logged out');
             logout_user();
             flash('success', 'You have been logged out securely.');
         }

@@ -43,30 +43,34 @@ if (!api_can_access($pdo, $uid, $role, $pid)) {
 }
 
 $stmt = $pdo->prepare(
-    'SELECT MIN(m.id) AS id, m.sender_id, u.full_name AS sender_name, m.body, m.created_at
+    'SELECT MIN(m.id) AS id, m.sender_id, u.full_name AS sender_name, m.body,
+            m.message_type, m.audio_path, m.audio_duration, m.created_at
      FROM messages m
      JOIN users u ON m.sender_id = u.id
      WHERE m.project_id = ? AND m.id > ?
-     GROUP BY m.sender_id, m.body, m.created_at, u.full_name
+     GROUP BY m.sender_id, m.body, m.message_type, m.audio_path, m.audio_duration, m.created_at, u.full_name
      ORDER BY m.created_at ASC, MIN(m.id) ASC
      LIMIT 50'
 );
 $stmt->execute([$pid, $after]);
 $rows = $stmt->fetchAll();
 
-// Mark new messages as read for this user
 if (!empty($rows)) {
     $pdo->prepare('UPDATE messages SET is_read = 1, read_at = NOW() WHERE project_id = ? AND recipient_id = ? AND is_read = 0')
         ->execute([$pid, $uid]);
 }
 
+$base = rtrim((defined('BASE_URL') ? BASE_URL : ''), '/') . '/';
 $out = [];
 foreach ($rows as $m) {
     $out[] = [
-        'id'          => (int) $m['id'],
-        'sender_id'   => (int) $m['sender_id'],
-        'sender_name' => $m['sender_name'],
-        'body'        => $m['body'],
+        'id'             => (int) $m['id'],
+        'sender_id'      => (int) $m['sender_id'],
+        'sender_name'    => $m['sender_name'],
+        'body'           => $m['body'],
+        'message_type'   => $m['message_type'] ?? 'text',
+        'audio_url'      => !empty($m['audio_path']) ? $base . ltrim($m['audio_path'], '/') : null,
+        'audio_duration' => (int) ($m['audio_duration'] ?? 0),
         'created_at_fmt' => date('M j, H:i', strtotime($m['created_at'])),
     ];
 }

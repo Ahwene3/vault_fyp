@@ -125,6 +125,42 @@ if ($is_hod_area) {
 $app_sidebar_links = [];
 if ($renderAppSidebar) {
     $app_sidebar_links[] = ['label' => 'Dashboard', 'href' => 'dashboard.php', 'icon' => 'bi-speedometer2'];
+    /* announcement unread count for badge */
+    $ann_unread = 0;
+    if (!empty($user)) {
+        try {
+            $ann_pdo  = $pdo_header ?? getPDO();
+            $ann_now  = date('Y-m-d H:i:s');
+            $ann_uid  = (int) ($user['id'] ?? 0);
+            $ann_role = $user['role'] ?? '';
+            $ann_dept = (string) ($user['department'] ?? '');
+            if (in_array($ann_role, ['admin','hod'], true)) {
+                $ann_stmt = $ann_pdo->prepare(
+                    'SELECT COUNT(*) FROM announcements a
+                     WHERE a.is_active=1
+                     AND NOT EXISTS (SELECT 1 FROM announcement_reads ar WHERE ar.announcement_id=a.id AND ar.user_id=?)'
+                );
+                $ann_stmt->execute([$ann_uid]);
+            } else {
+                $ann_rv = ['student' => 'students', 'supervisor' => 'supervisors'][$ann_role] ?? '';
+                $ann_stmt = $ann_pdo->prepare(
+                    "SELECT COUNT(*) FROM announcements a
+                     WHERE a.is_active=1
+                     AND (a.scheduled_at IS NULL OR a.scheduled_at <= ?)
+                     AND (a.expires_at IS NULL OR a.expires_at > ?)
+                     AND (a.audience='all'" . ($ann_rv ? " OR a.audience=?" : '') . " OR (a.audience='department' AND a.department=?))
+                     AND NOT EXISTS (SELECT 1 FROM announcement_reads ar WHERE ar.announcement_id=a.id AND ar.user_id=?)"
+                );
+                $ann_bp = [$ann_now, $ann_now];
+                if ($ann_rv) $ann_bp[] = $ann_rv;
+                $ann_bp[] = $ann_dept;
+                $ann_bp[] = $ann_uid;
+                $ann_stmt->execute($ann_bp);
+            }
+            $ann_unread = (int) $ann_stmt->fetchColumn();
+        } catch (Throwable $e) { $ann_unread = 0; }
+    }
+
     if ($user['role'] === 'student') {
         $app_sidebar_links[] = ['label' => 'My Group', 'href' => 'student/group.php', 'icon' => 'bi-people'];
         $app_sidebar_links[] = ['label' => 'Submit Topic/Proposal', 'href' => 'student/submit_topic.php', 'icon' => 'bi-send'];
@@ -134,6 +170,37 @@ if ($renderAppSidebar) {
     } elseif ($user['role'] === 'supervisor') {
         $app_sidebar_links[] = ['label' => 'Group Vaults', 'href' => 'supervisor/students.php', 'icon' => 'bi-people'];
         $app_sidebar_links[] = ['label' => 'Messages', 'href' => 'messages.php', 'icon' => 'bi-chat-dots'];
+
+        /* ── Per-vault sidebar entries ── */
+        try {
+            $sv_q = ($pdo_header ?? getPDO())->prepare(
+                'SELECT p.id, p.title, p.status, p.group_id, p.student_id,
+                        g.name AS group_name, u.full_name AS student_name
+                 FROM projects p
+                 JOIN users u ON p.student_id = u.id
+                 LEFT JOIN `groups` g ON g.id = p.group_id
+                 WHERE p.supervisor_id = ?
+                   AND p.status NOT IN ("archived","rejected")
+                 ORDER BY p.updated_at DESC
+                 LIMIT 10'
+            );
+            $sv_q->execute([(int)($user['id'] ?? 0)]);
+            $sv_vaults = $sv_q->fetchAll();
+            if (!empty($sv_vaults)) {
+                $app_sidebar_links[] = ['type' => 'section', 'label' => 'My Vaults'];
+                foreach ($sv_vaults as $sv) {
+                    $vname = $sv['group_name'] ?: $sv['student_name'] ?: mb_substr($sv['title'], 0, 22);
+                    $app_sidebar_links[] = [
+                        'type'       => 'vault',
+                        'label'      => $vname,
+                        'href'       => 'supervisor/student_detail.php?pid=' . (int)$sv['id'],
+                        'status'     => $sv['status'],
+                        'pid'        => (int)$sv['id'],
+                        'student_id' => (int)$sv['student_id'],
+                    ];
+                }
+            }
+        } catch (Throwable $e) { /* never break layout */ }
     } elseif ($user['role'] === 'hod') {
         $app_sidebar_links[] = ['label' => 'Form Groups',        'href' => 'hod/group_import.php', 'icon' => 'bi-file-arrow-up'];
         $app_sidebar_links[] = ['label' => 'Topic Approval',     'href' => 'hod/topics.php',       'icon' => 'bi-clipboard-check'];
@@ -146,8 +213,11 @@ if ($renderAppSidebar) {
         $app_sidebar_links[] = ['label' => 'Users',            'href' => 'admin/users.php',            'icon' => 'bi-people'];
         $app_sidebar_links[] = ['label' => 'Projects',         'href' => 'admin/projects.php',         'icon' => 'bi-folder'];
         $app_sidebar_links[] = ['label' => 'Moderate Reviews', 'href' => 'admin/moderate_reviews.php', 'icon' => 'bi-shield-check'];
+        $app_sidebar_links[] = ['label' => 'Audit Logs',       'href' => 'admin/audit_logs.php',       'icon' => 'bi-shield-lock'];
         $app_sidebar_links[] = ['label' => 'Reports',          'href' => 'admin/reports.php',          'icon' => 'bi-clipboard-data'];
     }
+    $app_sidebar_links[] = ['label' => 'Announcements', 'href' => 'announcements.php', 'icon' => 'bi-megaphone',
+        'badge' => $ann_unread > 0 ? $ann_unread : null];
     $app_sidebar_links[] = ['label' => 'Discover Projects', 'href' => 'vault.php', 'icon' => 'bi-search'];
     $app_sidebar_links[] = ['label' => 'Profile', 'href' => 'profile.php', 'icon' => 'bi-person-circle'];
     $app_sidebar_links[] = ['label' => 'Notifications', 'href' => 'notifications.php', 'icon' => 'bi-bell', 'badge' => $notification_count > 0 ? $notification_count : null];
@@ -325,6 +395,22 @@ $user_initial = strtoupper(substr(trim((string) ($user['full_name'] ?? 'U')), 0,
                     </div>
                     <nav class="app-sidebar__nav">
                         <?php foreach ($app_sidebar_links as $link):
+                            $link_type = $link['type'] ?? 'link';
+                        ?>
+                        <?php if ($link_type === 'section'): ?>
+                            <div class="app-sidebar__section"><?= e($link['label']) ?></div>
+                        <?php elseif ($link_type === 'vault'):
+                            parse_str(parse_url($link['href'], PHP_URL_QUERY) ?? '', $_lq);
+                            $is_active = (strpos($current_path, 'supervisor/student_detail.php') !== false)
+                                && isset($_GET['pid']) && (int)$_GET['pid'] === (int)($_lq['pid'] ?? 0);
+                            $st = $link['status'] ?? 'in_progress';
+                        ?>
+                            <a class="app-sidebar__vault<?= $is_active ? ' is-active' : '' ?>" href="<?= base_url($link['href']) ?>">
+                                <span class="app-sidebar__vault-dot app-sidebar__vault-dot--<?= e($st) ?>"></span>
+                                <span class="app-sidebar__vault-name"><?= e(mb_substr($link['label'], 0, 20)) ?></span>
+                                <span class="app-sidebar__vault-status"><?= e(ucfirst(str_replace('_',' ',$st))) ?></span>
+                            </a>
+                        <?php else:
                             $link_path = ltrim($link['href'], '/');
                             $is_active = ($current_path === $link_path) || ($link_path === 'dashboard.php' && $current_path === '');
                         ?>
@@ -333,6 +419,7 @@ $user_initial = strtoupper(substr(trim((string) ($user['full_name'] ?? 'U')), 0,
                                 <span><?= e($link['label']) ?></span>
                                 <?php if (!empty($link['badge'])): ?><span class="app-sidebar__badge"><?= (int) $link['badge'] ?></span><?php endif; ?>
                             </a>
+                        <?php endif; ?>
                         <?php endforeach; ?>
                     </nav>
                     <a class="app-sidebar__logout" href="<?= base_url('logout.php') ?>">

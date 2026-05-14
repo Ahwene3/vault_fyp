@@ -158,8 +158,6 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<?php flash_messages(); ?>
-
 <?php if ($dept_scope_err): ?>
     <div class="alert alert-danger"><?= e($dept_scope_err) ?></div>
 <?php elseif (empty($proposals)): ?>

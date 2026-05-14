@@ -27,12 +27,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = ((int) ($user['archived_permanent'] ?? 0) === 1)
                         ? 'Your account has been permanently archived and cannot be restored.'
                         : 'Your account is archived. Contact admin for restoration.';
+                    audit_log($pdo, 'login_blocked', 'auth', 'user', (int)$user['id'], $user['email'],
+                        'Account archived', 'warning', (int)$user['id'], $user['full_name'], $user['role'], $user['department'] ?? null);
                 } else {
+                    audit_log($pdo, 'login', 'auth', 'user', (int)$user['id'], $user['email'],
+                        'Login successful', 'info', (int)$user['id'], $user['full_name'], $user['role'], $user['department'] ?? null);
                     login_user($user);
                     redirect(base_url('dashboard.php'));
                 }
             } else {
                 $error = 'Invalid email or password.';
+                audit_log($pdo, 'login_failed', 'auth', 'email', 0, $email,
+                    'Invalid credentials', 'warning', null, null, null, null);
             }
         }
     }

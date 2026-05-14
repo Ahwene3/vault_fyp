@@ -48,11 +48,21 @@ $members_stmt = $pdo->prepare(
 $members_stmt->execute([$group_id]);
 $members = $members_stmt->fetchAll();
 
-/* supervisor (after approval) */
+/* supervisor — check groups table first, fall back to projects table */
 $supervisor = null;
-if ($group['supervisor_id']) {
-    $sv = $pdo->prepare('SELECT full_name, email FROM users WHERE id=? LIMIT 1');
-    $sv->execute([$group['supervisor_id']]);
+$sup_id = (int) ($group['supervisor_id'] ?? 0);
+if (!$sup_id) {
+    $sp = $pdo->prepare('SELECT supervisor_id FROM projects WHERE group_id = ? AND supervisor_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1');
+    $sp->execute([$group_id]);
+    $sup_id = (int) ($sp->fetchColumn() ?: 0);
+    if ($sup_id) {
+        // backfill so future loads hit the fast path
+        $pdo->prepare('UPDATE `groups` SET supervisor_id = ? WHERE id = ?')->execute([$sup_id, $group_id]);
+    }
+}
+if ($sup_id) {
+    $sv = $pdo->prepare('SELECT full_name, email FROM users WHERE id = ? LIMIT 1');
+    $sv->execute([$sup_id]);
     $supervisor = $sv->fetch();
 }
 

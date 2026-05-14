@@ -36,6 +36,13 @@ function csrf_field(): string {
     return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($_SESSION['csrf_token']) . '">';
 }
 
+function csrf_token(): string {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
 function csrf_verify(): bool {
     $token = $_POST['csrf_token'] ?? '';
     return !empty($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
@@ -53,6 +60,92 @@ function flash(string $key, $value = null) {
 
 function e(?string $s): string {
     return $s === null ? '' : htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+}
+
+function get_client_ip(): string {
+    foreach (['HTTP_X_FORWARDED_FOR','HTTP_CLIENT_IP','REMOTE_ADDR'] as $k) {
+        if (!empty($_SERVER[$k])) return trim(explode(',', $_SERVER[$k])[0]);
+    }
+    return '0.0.0.0';
+}
+
+function parse_ua_short(string $ua): string {
+    if (str_contains($ua,'Edg'))     return 'Edge';
+    if (str_contains($ua,'Chrome'))  return 'Chrome';
+    if (str_contains($ua,'Firefox')) return 'Firefox';
+    if (str_contains($ua,'Safari'))  return 'Safari';
+    if (str_contains($ua,'curl'))    return 'cURL';
+    return mb_substr($ua, 0, 40) ?: 'Unknown';
+}
+
+function ensure_audit_logs_table(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS audit_logs (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NULL DEFAULT NULL,
+        user_name VARCHAR(255) NULL DEFAULT NULL,
+        user_role VARCHAR(50) NULL DEFAULT NULL,
+        user_dept VARCHAR(255) NULL DEFAULT NULL,
+        action VARCHAR(100) NOT NULL,
+        category ENUM('auth','content','user_management','project','document','announcement','security','system') NOT NULL DEFAULT 'system',
+        target_type VARCHAR(100) NULL DEFAULT NULL,
+        target_id INT UNSIGNED NULL DEFAULT NULL,
+        target_label VARCHAR(255) NULL DEFAULT NULL,
+        details TEXT NULL DEFAULT NULL,
+        ip_address VARCHAR(45) NULL DEFAULT NULL,
+        user_agent VARCHAR(300) NULL DEFAULT NULL,
+        severity ENUM('info','warning','critical') NOT NULL DEFAULT 'info',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user (user_id),
+        INDEX idx_action (action),
+        INDEX idx_category (category),
+        INDEX idx_severity (severity),
+        INDEX idx_created (created_at),
+        INDEX idx_ip (ip_address)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function audit_log(
+    PDO $pdo,
+    string $action,
+    string $category = 'system',
+    string $target_type = '',
+    int $target_id = 0,
+    string $target_label = '',
+    string $details = '',
+    string $severity = 'info',
+    ?int $user_id = null,
+    ?string $user_name = null,
+    ?string $user_role = null,
+    ?string $user_dept = null
+): void {
+    try {
+        ensure_audit_logs_table($pdo);
+        /* Fall back to session user if not supplied */
+        if ($user_id === null && isset($_SESSION['user'])) {
+            $su = $_SESSION['user'];
+            $user_id   = (int) ($su['id']         ?? 0) ?: null;
+            $user_name = $user_name  ?? ($su['full_name']  ?? null);
+            $user_role = $user_role  ?? ($su['role']       ?? null);
+            $user_dept = $user_dept  ?? ($su['department'] ?? null);
+        }
+        $ip = get_client_ip();
+        $ua = parse_ua_short((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
+        $pdo->prepare(
+            'INSERT INTO audit_logs
+             (user_id,user_name,user_role,user_dept,action,category,target_type,target_id,target_label,details,ip_address,user_agent,severity)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        )->execute([
+            $user_id, $user_name, $user_role, $user_dept,
+            $action, $category,
+            $target_type ?: null,
+            $target_id ?: null,
+            $target_label ?: null,
+            $details ?: null,
+            $ip, $ua, $severity,
+        ]);
+    } catch (Throwable $e) {
+        /* never crash the app over a log failure */
+    }
 }
 
 function sql_placeholders(int $count): string {
@@ -568,12 +661,77 @@ function record_project_view(PDO $pdo, int $project_id, ?int $user_id): void {
     $pdo->prepare('UPDATE projects SET view_count = view_count + 1 WHERE id = ?')->execute([$project_id]);
 }
 
+/** Ensure RMU score sheet columns exist on assessments table. */
+function ensure_rmu_assessment_columns(PDO $pdo): void {
+    $stmt = $pdo->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'assessments'");
+    $existing = array_map('strtolower', array_column($stmt->fetchAll(), 'COLUMN_NAME'));
+
+    $new_cols = [
+        'aims_objectives'            => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'literature_review'          => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'methodology_strength'       => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'data_collection'            => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'logical_arguments'          => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'conclusions_recommendations'=> 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'writing'                    => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'presentation'               => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'safety_ethics'              => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'logbook_score'              => 'DECIMAL(4,1) NULL DEFAULT NULL',
+        'remarks'                    => 'TEXT NULL DEFAULT NULL',
+        'supervisor_confirmed'       => 'TINYINT(1) NOT NULL DEFAULT 0',
+        'confirmed_at'               => 'TIMESTAMP NULL DEFAULT NULL',
+    ];
+    foreach ($new_cols as $col => $def) {
+        if (!in_array(strtolower($col), $existing, true)) {
+            try {
+                $pdo->exec("ALTER TABLE assessments ADD COLUMN `$col` $def");
+            } catch (Throwable $ex) {
+                if (stripos($ex->getMessage(), 'duplicate column') === false) throw $ex;
+            }
+        }
+    }
+}
+
 /** Refresh avg_rating and rating_count on projects table. */
 function refresh_project_rating(PDO $pdo, int $project_id): void {
     $stmt = $pdo->prepare('SELECT AVG(rating), COUNT(*) FROM project_ratings WHERE project_id = ? AND status = "visible"');
     $stmt->execute([$project_id]);
     [$avg, $cnt] = $stmt->fetch(PDO::FETCH_NUM);
     $pdo->prepare('UPDATE projects SET avg_rating = ?, rating_count = ? WHERE id = ?')->execute([$avg ?: null, (int) $cnt, $project_id]);
+}
+
+function ensure_announcements_tables(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS announcements (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        category ENUM('academic','viva_notice','deadline_reminder','urgent_alert','general') NOT NULL DEFAULT 'general',
+        priority ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
+        audience ENUM('all','students','supervisors','department') NOT NULL DEFAULT 'all',
+        department VARCHAR(255) NULL DEFAULT NULL,
+        author_id INT UNSIGNED NOT NULL,
+        is_pinned TINYINT(1) NOT NULL DEFAULT 0,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        scheduled_at TIMESTAMP NULL DEFAULT NULL,
+        expires_at TIMESTAMP NULL DEFAULT NULL,
+        attachment_path VARCHAR(500) NULL DEFAULT NULL,
+        attachment_name VARCHAR(255) NULL DEFAULT NULL,
+        link_url VARCHAR(500) NULL DEFAULT NULL,
+        link_label VARCHAR(255) NULL DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_author (author_id),
+        INDEX idx_active_sched (is_active, scheduled_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS announcement_reads (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        announcement_id INT UNSIGNED NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_ann_read (announcement_id, user_id),
+        INDEX idx_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
 /** Upsert a user interest weight. */

@@ -223,8 +223,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
             flash('error', 'Invalid member selected for contribution rating.');
             redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#contributions'));
         }
-        if ($rating_score < 0 || $rating_score > 100) {
-            flash('error', 'Contribution rating must be between 0 and 100.');
+        if ($rating_score < 0 || $rating_score > 10) {
+            flash('error', 'Contribution rating must be between 0 and 10.');
             redirect(base_url('supervisor/student_detail.php?pid=' . $pid . '#contributions'));
         }
 
@@ -323,9 +323,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     }
 }
 
-$assessments = $pdo->prepare('SELECT * FROM assessments WHERE project_id = ? ORDER BY submitted_at DESC');
-$assessments->execute([$pid]);
-$assessments = $assessments->fetchAll();
 
 $pageTitle = 'Group Vault Detail';
 require_once __DIR__ . '/../includes/header.php';
@@ -348,9 +345,6 @@ require_once __DIR__ . '/../includes/header.php';
 <?php endif; ?>
 
 <div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
-    <a href="<?= base_url('supervisor/logsheet.php?pid=' . $pid) ?>" class="btn btn-outline-primary">
-        <i class="bi bi-journal-text"></i> Log Sheet
-    </a>
     <a href="<?= base_url('supervisor/assessment.php?pid=' . $pid) ?>" class="btn btn-outline-success">
         <i class="bi bi-award"></i> Assessment Sheet
     </a>
@@ -373,8 +367,7 @@ require_once __DIR__ . '/../includes/header.php';
 <ul class="nav nav-tabs mb-4" id="detailTabs" role="tablist">
     <li class="nav-item" role="presentation"><a class="nav-link active" data-bs-toggle="tab" href="#documents">Documents</a></li>
     <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#milestones" id="tab-milestones">Milestones</a></li>
-    <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#logbook">Logbook</a></li>
-    <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#assessments">Assessments</a></li>
+    <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#logbook">Supervisor Log Book</a></li>
     <li class="nav-item" role="presentation"><a class="nav-link" data-bs-toggle="tab" href="#contributions">Contributions</a></li>
 </ul>
 
@@ -527,62 +520,6 @@ require_once __DIR__ . '/../includes/header.php';
         <?php endif; ?>
     </div>
 
-    <div class="tab-pane fade" id="assessments">
-        <div class="card mb-3">
-            <div class="card-header">Submit Assessment</div>
-            <div class="card-body">
-                <form method="post">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="action" value="assessment">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Type</label>
-                            <select name="assessment_type" class="form-select">
-                                <option value="proposal_review">Proposal Review</option>
-                                <option value="progress">Progress</option>
-                                <option value="final_grade">Final Grade</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label">Score</label>
-                            <input type="number" name="score" class="form-control" step="0.01" min="0">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label">Max</label>
-                            <input type="number" name="max_score" class="form-control" value="100" step="0.01">
-                        </div>
-                        <div class="col-md-12">
-                            <label class="form-label">Comments</label>
-                            <textarea name="comments" class="form-control" rows="2"></textarea>
-                        </div>
-                        <div class="col-12"><button type="submit" class="btn btn-primary">Save Assessment</button></div>
-                    </div>
-                </form>
-            </div>
-        </div>
-        <div class="card">
-            <div class="card-body">
-                <h6>Previous assessments</h6>
-                <?php if (empty($assessments)): ?><p class="text-muted mb-0">None yet.</p>
-                <?php else: ?>
-                    <table class="table table-sm">
-                        <thead><tr><th>Type</th><th>Score</th><th>Comments</th><th>Date</th></tr></thead>
-                        <tbody>
-                            <?php foreach ($assessments as $a): ?>
-                                <tr>
-                                    <td><?= e($a['assessment_type']) ?></td>
-                                    <td><?= $a['score'] !== null ? e($a['score'] . ' / ' . $a['max_score']) : '—' ?></td>
-                                    <td><?= e($a['comments'] ?? '—') ?></td>
-                                    <td><?= e(date('M j, Y', strtotime($a['submitted_at']))) ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
     <div class="tab-pane fade" id="logbook">
         <?php
         $stmt = $pdo->prepare('SELECT id, entry_date, title, content, supervisor_approved, supervisor_comment, created_at FROM logbook_entries WHERE project_id = ? ORDER BY entry_date DESC');
@@ -606,7 +543,8 @@ require_once __DIR__ . '/../includes/header.php';
                                     <?= csrf_field() ?>
                                     <input type="hidden" name="entry_id" value="<?= $e['id'] ?>">
                                     <input type="hidden" name="project_id" value="<?= $pid ?>">
-                                    <input type="hidden" name="approve" value="1"><button type="submit" class="btn btn-sm btn-success">Approve</button>
+                                    <input type="hidden" name="approve" value="1">
+                                    <button type="submit" class="btn btn-sm btn-success">Approve</button>
                                 </form>
                                 <form method="post" action="<?= base_url('supervisor/logbook_action.php') ?>" class="d-inline">
                                     <?= csrf_field() ?>
@@ -625,84 +563,259 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 
     <div class="tab-pane fade" id="contributions">
-        <div class="card">
-            <div class="card-header">Group Vault Contribution Matrix</div>
-            <div class="card-body">
-                <?php if (empty($member_profiles)): ?>
-                    <p class="text-muted mb-0">No members found for contribution tracking.</p>
-                <?php else: ?>
-                    <p class="text-muted small mb-3">
-                        Input score formula: documents x 3 + logbook entries x 2 + messages sent.
-                        Supervisor rating is set on a 0-100 scale per member.
-                    </p>
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle">
-                            <thead>
-                                <tr>
-                                    <th>Member</th>
-                                    <th>Index No.</th>
-                                    <th>Role</th>
-                                    <th>Docs</th>
-                                    <th>Logbook</th>
-                                    <th>Messages</th>
-                                    <th>Input Score</th>
-                                    <th style="min-width: 200px;">Contribution Status</th>
-                                    <th style="min-width: 320px;">Supervisor Rating</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($member_profiles as $m): ?>
-                                    <?php
-                                        $cs = $m['contribution_status'] ?? 'partial';
-                                        $cs_badge = $cs === 'contributed' ? 'bg-success' : ($cs === 'not_contributed' ? 'bg-danger' : 'bg-warning text-dark');
-                                        $cs_label = $cs === 'contributed' ? 'Contributed' : ($cs === 'not_contributed' ? 'Not Contributed' : 'Partial');
-                                    ?>
-                                    <tr>
-                                        <td>
-                                            <?= e($m['full_name']) ?>
-                                            <?php if (($m['role'] ?? '') === 'lead'): ?><span class="badge bg-warning text-dark ms-1">Lead</span><?php endif; ?>
-                                        </td>
-                                        <td><?= e($m['index_number'] ?: $m['email']) ?></td>
-                                        <td><?= e(ucfirst($m['role'] ?? 'member')) ?></td>
-                                        <td><?= (int) $m['docs_uploaded'] ?></td>
-                                        <td><?= (int) $m['logbook_entries'] ?></td>
-                                        <td><?= (int) $m['messages_sent'] ?></td>
-                                        <td><strong><?= (int) $m['activity_score'] ?></strong></td>
-                                        <td>
-                                            <span class="badge <?= $cs_badge ?> mb-1"><?= $cs_label ?></span>
-                                            <form method="post" class="d-flex gap-1 flex-wrap align-items-center mt-1">
-                                                <?= csrf_field() ?>
-                                                <input type="hidden" name="action" value="update_contribution_status">
-                                                <input type="hidden" name="member_id" value="<?= (int) $m['student_id'] ?>">
-                                                <select name="contribution_status" class="form-select form-select-sm" style="max-width: 165px;">
-                                                    <option value="partial" <?= $cs === 'partial' ? 'selected' : '' ?>>Partial</option>
-                                                    <option value="contributed" <?= $cs === 'contributed' ? 'selected' : '' ?>>Contributed</option>
-                                                    <option value="not_contributed" <?= $cs === 'not_contributed' ? 'selected' : '' ?>>Not Contributed</option>
-                                                </select>
-                                                <button type="submit" class="btn btn-sm btn-outline-secondary">Set</button>
-                                            </form>
-                                        </td>
-                                        <td>
-                                            <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
-                                                <?= csrf_field() ?>
-                                                <input type="hidden" name="action" value="rate_contribution">
-                                                <input type="hidden" name="member_id" value="<?= (int) $m['student_id'] ?>">
-                                                <input type="number" class="form-control form-control-sm" name="rating_score" min="0" max="100" step="0.01" placeholder="0-100" style="max-width: 90px;" value="<?= $m['contribution_rating'] !== null ? e((string) $m['contribution_rating']) : '' ?>" required>
-                                                <input type="text" class="form-control form-control-sm" name="rating_note" placeholder="Optional note" style="min-width: 170px;" value="<?= e($m['rating_note'] ?? '') ?>">
-                                                <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                                            </form>
-                                            <?php if (!empty($m['rated_at'])): ?>
-                                                <small class="text-muted d-block mt-1">Last rated: <?= e(date('M j, Y H:i', strtotime($m['rated_at']))) ?></small>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+        <?php if (empty($member_profiles)): ?>
+            <div class="card"><div class="card-body text-muted">No members found for contribution tracking.</div></div>
+        <?php else: ?>
+        <?php
+            /* ── Prepare data arrays for charts ── */
+            $c_names   = [];
+            $c_docs    = [];
+            $c_logbook = [];
+            $c_msgs    = [];
+            $c_scores  = [];
+            $c_ratings = [];
+            $c_status  = [];
+            foreach ($member_profiles as $m) {
+                $short = explode(' ', trim($m['full_name']));
+                $c_names[]   = count($short) > 1 ? $short[0] . ' ' . $short[count($short)-1] : $m['full_name'];
+                $c_docs[]    = (int) $m['docs_uploaded'];
+                $c_logbook[] = (int) $m['logbook_entries'];
+                $c_msgs[]    = (int) $m['messages_sent'];
+                $c_scores[]  = (int) $m['activity_score'];
+                $c_ratings[] = $m['contribution_rating'] !== null ? (float) $m['contribution_rating'] : 0;
+                $cs = $m['contribution_status'] ?? 'partial';
+                $c_status[]  = $cs === 'contributed' ? 'Contributed' : ($cs === 'not_contributed' ? 'Not Contributed' : 'Partial');
+            }
+            $palette = ['#4e79d6','#38bdf8','#34d399','#fb923c','#f472b6','#a78bfa','#facc15'];
+        ?>
+
+        <!-- ── Charts row ── -->
+        <div class="row g-3 mb-4">
+            <!-- Activity breakdown grouped bar -->
+            <div class="col-lg-7">
+                <div class="card h-100">
+                    <div class="card-header small fw-semibold">Activity Breakdown per Member</div>
+                    <div class="card-body d-flex align-items-center justify-content-center" style="min-height:260px;">
+                        <canvas id="activityBarChart"></canvas>
                     </div>
-                <?php endif; ?>
+                </div>
+            </div>
+            <!-- Activity score doughnut -->
+            <div class="col-lg-5">
+                <div class="card h-100">
+                    <div class="card-header small fw-semibold">Activity Score Distribution</div>
+                    <div class="card-body d-flex align-items-center justify-content-center" style="min-height:260px;">
+                        <canvas id="activityDoughnut" style="max-height:230px;"></canvas>
+                    </div>
+                </div>
             </div>
         </div>
+
+        <!-- Supervisor rating bar -->
+        <?php if (array_sum($c_ratings) > 0): ?>
+        <div class="card mb-4">
+            <div class="card-header small fw-semibold">Supervisor Rating (0 – 10)</div>
+            <div class="card-body" style="min-height:160px;">
+                <canvas id="ratingBar"></canvas>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- ── Per-member status + rating forms ── -->
+        <div class="row g-3">
+            <?php foreach ($member_profiles as $idx => $m):
+                $cs       = $m['contribution_status'] ?? 'partial';
+                $cs_color = $cs === 'contributed' ? 'success' : ($cs === 'not_contributed' ? 'danger' : 'warning');
+                $cs_label = $cs === 'contributed' ? 'Contributed' : ($cs === 'not_contributed' ? 'Not Contributed' : 'Partial');
+                $bar_pct  = min(100, (int) $m['activity_score']);
+                $color    = $palette[$idx % count($palette)];
+            ?>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body pb-2">
+                        <!-- Member header -->
+                        <div class="d-flex align-items-center gap-2 mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold text-white flex-shrink-0"
+                                 style="width:40px;height:40px;background:<?= $color ?>;font-size:.95rem;">
+                                <?= strtoupper(substr($m['full_name'], 0, 1)) ?>
+                            </div>
+                            <div>
+                                <div class="fw-semibold lh-1"><?= e($m['full_name']) ?>
+                                    <?php if (($m['role'] ?? '') === 'lead'): ?>
+                                        <span class="badge bg-warning text-dark ms-1" style="font-size:.65em;">Lead</span>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="text-muted small"><?= e($m['index_number'] ?: $m['email']) ?></div>
+                            </div>
+                            <span class="badge bg-<?= $cs_color ?> ms-auto"><?= $cs_label ?></span>
+                        </div>
+
+                        <!-- Mini stats row -->
+                        <div class="row g-2 text-center mb-3">
+                            <div class="col-4">
+                                <div class="fw-bold fs-5"><?= (int) $m['docs_uploaded'] ?></div>
+                                <div class="text-muted" style="font-size:.72em;">DOCS</div>
+                            </div>
+                            <div class="col-4">
+                                <div class="fw-bold fs-5"><?= (int) $m['logbook_entries'] ?></div>
+                                <div class="text-muted" style="font-size:.72em;">LOGBOOK</div>
+                            </div>
+                            <div class="col-4">
+                                <div class="fw-bold fs-5"><?= (int) $m['messages_sent'] ?></div>
+                                <div class="text-muted" style="font-size:.72em;">MESSAGES</div>
+                            </div>
+                        </div>
+
+                        <!-- Activity score progress bar -->
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between small mb-1">
+                                <span class="text-muted">Activity Score</span>
+                                <strong><?= (int) $m['activity_score'] ?></strong>
+                            </div>
+                            <div class="progress" style="height:8px;">
+                                <div class="progress-bar" role="progressbar"
+                                     style="width:<?= $bar_pct ?>%;background:<?= $color ?>;"
+                                     aria-valuenow="<?= $bar_pct ?>" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
+
+                        <!-- Supervisor rating display -->
+                        <?php if ($m['contribution_rating'] !== null): ?>
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between small mb-1">
+                                <span class="text-muted">Supervisor Rating</span>
+                                <strong><?= number_format((float)$m['contribution_rating'], 1) ?> / 10</strong>
+                            </div>
+                            <div class="progress" style="height:8px;">
+                                <div class="progress-bar bg-info" role="progressbar"
+                                     style="width:<?= min(100, (float)$m['contribution_rating'] * 10) ?>%;"
+                                     aria-valuenow="<?= $m['contribution_rating'] ?>" aria-valuemin="0" aria-valuemax="10"></div>
+                            </div>
+                            <?php if ($m['rating_note']): ?>
+                                <div class="text-muted mt-1" style="font-size:.75em;"><i class="bi bi-quote me-1"></i><?= e($m['rating_note']) ?></div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Forms footer -->
+                    <div class="card-footer py-2 d-flex flex-wrap gap-2 align-items-center">
+                        <!-- Status -->
+                        <form method="post" class="d-flex gap-1 align-items-center">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="update_contribution_status">
+                            <input type="hidden" name="member_id" value="<?= (int) $m['student_id'] ?>">
+                            <select name="contribution_status" class="form-select form-select-sm" style="width:auto;">
+                                <option value="partial"          <?= $cs === 'partial'          ? 'selected' : '' ?>>Partial</option>
+                                <option value="contributed"      <?= $cs === 'contributed'      ? 'selected' : '' ?>>Contributed</option>
+                                <option value="not_contributed"  <?= $cs === 'not_contributed'  ? 'selected' : '' ?>>Not Contributed</option>
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">Set</button>
+                        </form>
+                        <!-- Rating -->
+                        <form method="post" class="d-flex gap-1 align-items-center flex-grow-1">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="rate_contribution">
+                            <input type="hidden" name="member_id" value="<?= (int) $m['student_id'] ?>">
+                            <input type="number" class="form-control form-control-sm" name="rating_score"
+                                   min="0" max="10" step="0.1" placeholder="0 – 10" style="width:90px;"
+                                   oninput="if(+this.value>10)this.value=10;if(+this.value<0)this.value=0;"
+                                   value="<?= $m['contribution_rating'] !== null ? e((string) $m['contribution_rating']) : '' ?>" required>
+                            <input type="text" class="form-control form-control-sm" name="rating_note"
+                                   placeholder="Note" style="min-width:80px;flex:1;"
+                                   value="<?= e($m['rating_note'] ?? '') ?>">
+                            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+
+        <!-- Chart.js -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <script>
+        (function () {
+            const names   = <?= json_encode($c_names) ?>;
+            const docs    = <?= json_encode($c_docs) ?>;
+            const logbook = <?= json_encode($c_logbook) ?>;
+            const msgs    = <?= json_encode($c_msgs) ?>;
+            const scores  = <?= json_encode($c_scores) ?>;
+            const ratings = <?= json_encode($c_ratings) ?>;
+            const palette = <?= json_encode($palette) ?>;
+
+            const gridColor  = 'rgba(255,255,255,.08)';
+            const tickColor  = 'rgba(255,255,255,.5)';
+            const legendOpts = { labels: { color: tickColor, boxWidth: 12, padding: 12 } };
+
+            /* ── Activity grouped bar ── */
+            new Chart(document.getElementById('activityBarChart'), {
+                type: 'bar',
+                data: {
+                    labels: names,
+                    datasets: [
+                        { label: 'Documents',       data: docs,    backgroundColor: '#4e79d6' },
+                        { label: 'Logbook Entries', data: logbook, backgroundColor: '#34d399' },
+                        { label: 'Messages',        data: msgs,    backgroundColor: '#fb923c' },
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: { legend: legendOpts },
+                    scales: {
+                        x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+                        y: { beginAtZero: true, ticks: { color: tickColor, stepSize: 1 }, grid: { color: gridColor } }
+                    }
+                }
+            });
+
+            /* ── Activity score doughnut ── */
+            new Chart(document.getElementById('activityDoughnut'), {
+                type: 'doughnut',
+                data: {
+                    labels: names,
+                    datasets: [{ data: scores, backgroundColor: palette, borderWidth: 2 }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: true,
+                    plugins: {
+                        legend: legendOpts,
+                        tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + ctx.parsed } }
+                    },
+                    cutout: '62%'
+                }
+            });
+
+            /* ── Supervisor rating horizontal bar ── */
+            const ratingEl = document.getElementById('ratingBar');
+            if (ratingEl) {
+                new Chart(ratingEl, {
+                    type: 'bar',
+                    data: {
+                        labels: names,
+                        datasets: [{
+                            label: 'Supervisor Rating',
+                            data: ratings,
+                            backgroundColor: palette.map(c => c + 'cc'),
+                            borderColor: palette,
+                            borderWidth: 1,
+                            borderRadius: 4,
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { min: 0, max: 10, ticks: { color: tickColor }, grid: { color: gridColor } },
+                            y: { ticks: { color: tickColor }, grid: { color: gridColor } }
+                        }
+                    }
+                });
+            }
+        })();
+        </script>
+        <?php endif; ?>
     </div>
 </div>
 

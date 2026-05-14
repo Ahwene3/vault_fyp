@@ -29,6 +29,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
 
                 $pdo->prepare('UPDATE users SET is_active = 0, archived_permanent = 0, archived_at = NOW(), archived_by = ? WHERE id = ?')
                     ->execute([user_id(), $target_id]);
+                audit_log($pdo, 'user_archive', 'user_management', 'user', $target_id,
+                    $target_user['role'] ?? '', 'User archived', 'warning');
                 flash('success', 'User archived.');
             } elseif ($action === 'restore') {
                 if ((int) $target_user['is_active'] === 1) {
@@ -56,6 +58,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
 
                 $pdo->prepare('UPDATE users SET is_active = 1, archived_permanent = 0, archived_at = NULL, archived_by = NULL WHERE id = ?')
                     ->execute([$target_id]);
+                audit_log($pdo, 'user_restore', 'user_management', 'user', $target_id,
+                    $target_user['role'] ?? '', 'User restored', 'info');
                 flash('success', 'User restored.');
             } elseif ($action === 'mark_permanent_archive') {
                 if ((int) $target_user['is_active'] === 1) {
@@ -70,6 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
 
                 $pdo->prepare('UPDATE users SET archived_permanent = 1, archived_at = COALESCE(archived_at, NOW()), archived_by = COALESCE(archived_by, ?) WHERE id = ?')
                     ->execute([user_id(), $target_id]);
+                audit_log($pdo, 'user_permanent_archive', 'user_management', 'user', $target_id,
+                    $target_user['role'] ?? '', 'Permanently archived', 'critical');
                 flash('success', 'Archived user marked as permanent.');
             }
         } elseif ($action === 'update_user') {

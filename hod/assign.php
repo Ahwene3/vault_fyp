@@ -103,6 +103,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
             $upd = $pdo->prepare('UPDATE projects SET supervisor_id = ?, status = "in_progress" WHERE id = ? AND status = "approved" AND supervisor_id IS NULL');
             $upd->execute([$chosen['id'], $p['id']]);
             if ($upd->rowCount()) {
+                if (!empty($p['group_id'])) {
+                    $pdo->prepare('UPDATE `groups` SET supervisor_id = ? WHERE id = ?')->execute([$chosen['id'], $p['group_id']]);
+                }
                 $load[(int) $chosen['id']]++;
                 $assigned_count++;
                 foreach (assign_member_ids($pdo, (int) $p['id']) as $member_id) {

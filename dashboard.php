@@ -878,4 +878,6 @@ $is_project_archived = !empty($stats['project']) && ($stats['project']['status']
 
         </section>
 
+<?php require_once __DIR__ . '/includes/announcement_widget.php'; ?>
+
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

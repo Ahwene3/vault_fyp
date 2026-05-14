@@ -67,11 +67,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
     }
     $action = $_POST['action'] ?? '';
     if ($action === 'add_entry' && $project_id) {
-        $entry_date = $_POST['entry_date'] ?? '';
+        $entry_date = date('Y-m-d'); // always server date — students cannot manipulate this
         $title = trim($_POST['title'] ?? '');
         $content = trim($_POST['content'] ?? '');
-        if (!$entry_date || !$title || !$content) {
-            $error = 'Please fill date, title, and content.';
+        if (!$title || !$content) {
+            $error = 'Please fill in the title and activity summary.';
         } else {
             $stmt = $pdo->prepare('INSERT INTO logbook_entries (project_id, entry_date, title, content, created_by) VALUES (?, ?, ?, ?, ?)');
             $stmt->execute([$project_id, $entry_date, $title, $content, $uid]);
@@ -182,13 +182,15 @@ require_once __DIR__ . '/../includes/header.php';
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="add_entry">
                 <div class="row g-3">
-                    <div class="col-md-3">
+                    <div class="col-md-8">
                         <label class="form-label">Entry Title</label>
                         <input type="text" name="title" class="form-control" required maxlength="255">
                     </div>
-                    <div class="col-md-3">
-                        <label class="form-label">Date</label>
-                        <input type="date" name="entry_date" class="form-control" value="<?= e(date('Y-m-d')) ?>" required>
+                    <div class="col-md-4 d-flex flex-column justify-content-end">
+                        <label class="form-label text-muted small">Date (auto-set)</label>
+                        <div class="form-control bg-transparent text-muted" style="cursor:default;">
+                            <i class="bi bi-calendar-lock me-1"></i><?= date('M j, Y') ?>
+                        </div>
                     </div>
                     <div class="col-12">
                         <label class="form-label">Activity Summary</label>

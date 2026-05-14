@@ -115,6 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                         'Your project topic and proposal have been approved. A supervisor will be assigned shortly.',
                         base_url('student/project.php'));
                 }
+                audit_log($pdo, 'topic_approve', 'project', 'project', $project_id, '', 'Topic approved');
                 flash('success', 'Topic approved. Assign a supervisor from the Assign Supervisors page.');
             } else {
                 $reason = trim($_POST['rejection_reason'] ?? '');
@@ -125,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_verify()) {
                         'Your project topic was rejected.' . ($reason ? " Reason: $reason" : '') . ' You may resubmit.',
                         base_url('student/project.php'));
                 }
+                audit_log($pdo, 'topic_reject', 'project', 'project', $project_id, $reason ?: '', 'Topic rejected', 'warning');
                 flash('success', 'Topic rejected.');
             }
         }
