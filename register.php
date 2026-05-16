@@ -348,7 +348,7 @@ $pageTitle = 'Register';
         <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(8,15,35,0)_0%,rgba(5,8,22,0.35)_72%,rgba(5,8,22,0.88)_100%)]"></div>
 
         <header class="relative z-10 flex items-center justify-between gap-4 px-6 py-5 sm:px-8 lg:px-12">
-            <a href="<?= base_url('index.php') ?>" class="inline-flex items-center gap-3">
+            <a href="<?= base_url('login.php') ?>" class="inline-flex items-center gap-3">
                 <span class="grid h-11 w-11 place-items-center rounded-2xl border border-cyan-400/25 bg-gradient-to-br from-indigo-500 via-violet-500 to-cyan-400 shadow-[0_0_30px_rgba(34,211,238,0.18)]">
                     <i class="bi bi-safe2-fill text-lg text-white"></i>
                 </span>
@@ -594,7 +594,7 @@ $pageTitle = 'Register';
 
                     <p class="mt-5 text-sm text-slate-400">
                         Already have an account?
-                        <a href="<?= base_url('index.php') ?>" class="font-semibold text-cyan-200 transition hover:text-white">Back to Sign In</a>
+                        <a href="<?= base_url('login.php') ?>" class="font-semibold text-cyan-200 transition hover:text-white">Back to Sign In</a>
                     </p>
                 </div>
             </section>

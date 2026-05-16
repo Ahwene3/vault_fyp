@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/auth.php';
 
-$loginUrl = base_url('index.php');
+$loginUrl = base_url('login.php');
 $dashboardUrl = base_url('dashboard.php');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

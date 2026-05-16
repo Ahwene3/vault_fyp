@@ -146,7 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="mt-6 text-center text-sm text-slate-500">
                 Remembered your password?
-                <a href="<?= base_url('index.php') ?>" class="font-semibold text-cyan-300 transition hover:text-white">Back to Sign In</a>
+                <a href="<?= base_url('login.php') ?>" class="font-semibold text-cyan-300 transition hover:text-white">Back to Sign In</a>
             </div>
         </section>
     </main>

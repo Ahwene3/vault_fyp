@@ -201,7 +201,7 @@ function send_registration_email(string $email, string $name): bool {
     $content .= "<p><strong>Your Email:</strong> $email</p>";
     $content .= "<p>Please keep your credentials secure and do not share your password with anyone.</p>";
 
-    $cta_url = get_app_url('index.php');
+    $cta_url = get_app_url('login.php');
     return send_template_email($email, 'Welcome to FYP Vault', $title, $content, 'Sign In Now', $cta_url);
 }
 

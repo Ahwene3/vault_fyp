@@ -394,7 +394,7 @@ $user_initial = strtoupper(substr(trim((string) ($user['full_name'] ?? 'U')), 0,
                             </ul>
                         </div>
                     <?php else: ?>
-                        <a class="btn btn-sm btn-outline-light me-2" href="<?= base_url('index.php') ?>">Login</a>
+                        <a class="btn btn-sm btn-outline-light me-2" href="<?= base_url('login.php') ?>">Login</a>
                         <a class="btn btn-sm btn-light" href="<?= base_url('register.php') ?>">Register</a>
                     <?php endif; ?>
                 </div>

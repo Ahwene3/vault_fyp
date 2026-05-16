@@ -25,7 +25,7 @@ function is_logged_in(): bool {
 function require_login(): void {
     if (!is_logged_in()) {
         flash('error', 'Please log in to continue.');
-        redirect(base_url('index.php'));
+        redirect(base_url('login.php'));
     }
 
     $uid = user_id();
@@ -39,7 +39,7 @@ function require_login(): void {
             : 'Your account is archived. Contact admin for restoration.';
 
         flash('error', $message);
-        redirect(base_url('index.php'));
+        redirect(base_url('login.php'));
     }
 }
 
